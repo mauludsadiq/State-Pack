@@ -64,6 +64,10 @@ enum Command {
         #[arg(long, default_value = "packets")]
         store: PathBuf,
     },
+    Tokenize {
+        #[arg(long)]
+        delta: PathBuf,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -100,6 +104,16 @@ struct Receipt {
     bytes: Option<u64>,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+struct TokenTrace {
+    version: String,
+    model: String,
+    delta_sha256: String,
+    token_count: u64,
+    token_ids: Vec<u32>,
+    token_trace_sha256: String,
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -108,6 +122,7 @@ fn main() -> Result<()> {
         Command::Delta { manifest, delta, out } => create_delta(&manifest, &delta, &out),
         Command::Resolve { store, base_hash } => resolve_packet(&store, &base_hash),
         Command::Infer { delta, store } => infer_packet(&delta, &store),
+        Command::Tokenize { delta } => tokenize_delta(&delta),
     }
 }
 
@@ -264,6 +279,22 @@ fn create_delta(manifest_path: &Path, delta_path: &Path, out_path: &Path) -> Res
         bytes: Some(delta.delta_bytes),
     };
     println!("{}", serde_json::to_string_pretty(&receipt)?);
+    Ok(())
+}
+
+fn tokenize_delta(delta_path: &Path) -> Result<()> {
+    let delta = read_delta_packet(delta_path)?;
+    let token_ids: Vec<u32> = delta.delta_text.as_bytes().iter().map(|b| *b as u32).collect();
+    let token_bytes = serde_json::to_vec(&token_ids)?;
+    let trace = TokenTrace {
+        version: "state-token-trace-v0.1".to_string(),
+        model: delta.model.clone(),
+        delta_sha256: delta.delta_sha256.clone(),
+        token_count: token_ids.len() as u64,
+        token_ids,
+        token_trace_sha256: sha256_bytes(&token_bytes),
+    };
+    println!("{}", serde_json::to_string_pretty(&trace)?);
     Ok(())
 }
 
