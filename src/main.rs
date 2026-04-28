@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
+use std::process::Command as ProcessCommand;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -102,16 +103,6 @@ struct Receipt {
     blob_sha256: Option<String>,
     delta_sha256: Option<String>,
     bytes: Option<u64>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct TokenTrace {
-    version: String,
-    model: String,
-    delta_sha256: String,
-    token_count: u64,
-    token_ids: Vec<u32>,
-    token_trace_sha256: String,
 }
 
 fn main() -> Result<()> {
@@ -284,17 +275,18 @@ fn create_delta(manifest_path: &Path, delta_path: &Path, out_path: &Path) -> Res
 
 fn tokenize_delta(delta_path: &Path) -> Result<()> {
     let delta = read_delta_packet(delta_path)?;
-    let token_ids: Vec<u32> = delta.delta_text.as_bytes().iter().map(|b| *b as u32).collect();
-    let token_bytes = serde_json::to_vec(&token_ids)?;
-    let trace = TokenTrace {
-        version: "state-token-trace-v0.1".to_string(),
-        model: delta.model.clone(),
-        delta_sha256: delta.delta_sha256.clone(),
-        token_count: token_ids.len() as u64,
-        token_ids,
-        token_trace_sha256: sha256_bytes(&token_bytes),
-    };
-    println!("{}", serde_json::to_string_pretty(&trace)?);
+    let output = ProcessCommand::new("python3")
+        .arg("gpt2_tokenize.py")
+        .arg("--text")
+        .arg(&delta.delta_text)
+        .output()
+        .context("run gpt2_tokenize.py")?;
+
+    if !output.status.success() {
+        bail!("tokenizer bridge failed: {}", String::from_utf8_lossy(&output.stderr));
+    }
+
+    print!("{}", String::from_utf8_lossy(&output.stdout));
     Ok(())
 }
 
