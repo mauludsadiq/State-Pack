@@ -104,6 +104,16 @@ struct Receipt {
     blob_sha256: Option<String>,
     delta_sha256: Option<String>,
     bytes: Option<u64>,
+    tokens: Option<TokenSavings>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct TokenSavings {
+    base: u64,
+    delta: u64,
+    processed: u64,
+    saved: u64,
+    savings_percent: f64,
 }
 
 fn main() -> Result<()> {
@@ -195,6 +205,7 @@ fn create_packet(model: &str, base_path: &Path, blob_path: &Path, out_dir: &Path
         blob_sha256: Some(manifest.blob_sha256.clone()),
         delta_sha256: None,
         bytes: Some(manifest.blob_bytes),
+        tokens: None,
     };
     emit_receipt(receipt)?;
     Ok(())
@@ -252,6 +263,7 @@ fn verify_packet(manifest_path: &Path) -> Result<()> {
         blob_sha256: Some(manifest.blob_sha256.clone()),
         delta_sha256: None,
         bytes: Some(manifest.blob_bytes),
+        tokens: None,
     };
     emit_receipt(receipt)?;
     Ok(())
@@ -280,6 +292,7 @@ fn create_delta(manifest_path: &Path, delta_path: &Path, out_path: &Path) -> Res
         blob_sha256: None,
         delta_sha256: Some(delta.delta_sha256.clone()),
         bytes: Some(delta.delta_bytes),
+        tokens: None,
     };
     emit_receipt(receipt)?;
     Ok(())
@@ -326,6 +339,13 @@ fn infer_packet(delta_path: &Path, store: &Path) -> Result<()> {
         blob_sha256: Some(manifest.blob_sha256.clone()),
         delta_sha256: Some(delta.delta_sha256.clone()),
         bytes: Some(delta.delta_bytes),
+        tokens: Some(TokenSavings {
+            base: manifest.base_bytes,
+            delta: delta.delta_bytes,
+            processed: delta.delta_bytes,
+            saved: manifest.base_bytes,
+            savings_percent: if manifest.base_bytes + delta.delta_bytes == 0 { 0.0 } else { (manifest.base_bytes as f64 / (manifest.base_bytes + delta.delta_bytes) as f64) * 100.0 },
+        }),
     };
 
     emit_receipt(receipt)?;
