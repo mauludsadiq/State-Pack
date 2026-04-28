@@ -1,241 +1,271 @@
 # State Pack
 
-State Pack is a Rust prototype for **content-addressed transformer state packet transport**.
+State Pack is a **content-addressed transformer state protocol**.
 
-It packages a cached transformer state blob, such as a GPT-2 `past_key_values` `.pt` file, under a deterministic address derived from the base semantic state. A later delta packet can point at that state address and carry only the new text.
+It treats model state, context, and inference as **verifiable packets**, not sessions.
 
-This turns full prompt replay into `state_packet(base_hash) + delta_text -> model resumes from cached state`.
-
-The Python GPT-2 experiment already proved the compute primitive:
-
-```text
-base_tokens: 931
-delta_tokens: 14
-full_tokens: 945
-full_seconds: 0.646858
-packet_delta_seconds: 0.054928
-load_seconds: 0.011197
-compute_speedup_excluding_load: 11.776x
-end_to_end_speedup_including_load: 9.782x
-max_abs_logit_diff: 8.392333984375e-05
-```
-
-State Pack is the Rust transport layer for that mechanism.
+---
 
 ## Core Idea
 
-A state packet has two files:
+Instead of:
 
-```text
-state_packet_<base_sha256>.pt
-state_packet_<base_sha256>.json
+```
+prompt → model → response (ephemeral, opaque)
 ```
 
-The base hash is computed from exact base text bytes:
+State Pack does:
 
-```text
-base_sha256 = SHA256(base_text_bytes)
+```
+state packet + delta packet → infer → receipt
 ```
 
-The blob hash is computed from raw cached-state bytes:
+Everything is:
 
-```text
-blob_sha256 = SHA256(state_blob_bytes)
-```
+* **content-addressed (SHA-256)**
+* **independently verifiable**
+* **replayable**
 
-The packet ID commits to packet version, model, base hash, base byte length, blob hash, and blob byte length:
+---
 
-```text
-packet_id = SHA256(version | model | base_sha256 | base_bytes | blob_sha256 | blob_bytes)
-```
+## Lifecycle
 
-That creates a content-addressed object suitable for routing, storage, replay, and verification.
-
-## Build
+### 1. CREATE — State Packet
 
 ```bash
-cargo build --release
+cargo run -- create --model gpt2 --base demo/base.txt --blob demo/blob.bin --out demo/store
 ```
 
-## Commands
+Output:
 
-### Create a state packet
+```json
+{
+  "op": "create",
+  "ok": true,
+  "packet_id": "...",
+  "base_sha256": "...",
+  "blob_sha256": "...",
+  "bytes": 1048576
+}
+```
+
+Creates:
+
+* `state_packet_<hash>.json` (manifest)
+* `state_packet_<hash>.pt` (KV cache blob)
+
+---
+
+### 2. VERIFY — Integrity
 
 ```bash
-cargo run -- create \
-  --model gpt2 \
-  --base examples/base.txt \
-  --blob examples/fake_state_packet.pt \
-  --out packets
+cargo run -- verify --manifest demo/store/state_packet_<hash>.json
 ```
 
-Output shape:
+Output:
 
-```text
-created=true
-packet_id=sha256:<packet_id>
-base_sha256=<base_hash>
-blob_sha256=<blob_hash>
-manifest=packets/state_packet_<base_hash>.json
-blob=packets/state_packet_<base_hash>.pt
+```json
+{
+  "op": "verify",
+  "ok": true,
+  "packet_id": "...",
+  "base_sha256": "...",
+  "blob_sha256": "...",
+  "bytes": 1048576
+}
 ```
 
-### Verify a state packet
+Guarantees:
 
-```bash
-cargo run -- verify \
-  --manifest packets/state_packet_<base_hash>.json
-```
+* blob matches hash
+* packet_id is correct
+* state is untampered
 
-Output shape:
+---
 
-```text
-ok=true
-packet_id=sha256:<packet_id>
-base_sha256=<base_hash>
-blob_sha256=<blob_hash>
-blob_bytes=<n>
-```
-
-### Create a delta packet
+### 3. DELTA — Routing Primitive
 
 ```bash
 cargo run -- delta \
-  --manifest packets/state_packet_<base_hash>.json \
+  --manifest demo/store/state_packet_<hash>.json \
   --delta examples/delta.txt \
-  --out packets/delta_packet.json
+  --out demo/delta_packet.json
 ```
 
-Output shape:
+Output:
 
-```text
-created=true
-delta_packet=packets/delta_packet.json
-delta_sha256=<delta_hash>
+```json
+{
+  "op": "delta",
+  "ok": true,
+  "packet_id": "...",
+  "base_sha256": "...",
+  "delta_sha256": "...",
+  "bytes": 57
+}
 ```
 
-### Resolve a state packet by base hash
+Delta packet contains:
+
+* pointer to state (`base_sha256`)
+* new information only
+* no KV cache
+
+---
+
+### 4. INFER — Stateless Execution
 
 ```bash
-cargo run -- resolve \
-  --store packets \
-  --base-hash <base_hash>
+cargo run -- infer \
+  --delta demo/delta_packet.json \
+  --store demo/store
 ```
 
-Output shape:
-
-```text
-manifest=packets/state_packet_<base_hash>.json
-blob=packets/state_packet_<base_hash>.pt
-```
-
-## Manifest Format
+Output:
 
 ```json
 {
-  "version": "state-pack-v0.1",
-  "model": "gpt2",
+  "op": "infer",
+  "ok": true,
+  "packet_id": "...",
   "base_sha256": "...",
-  "base_bytes": 178,
   "blob_sha256": "...",
-  "blob_bytes": 47,
-  "blob_file": "state_packet_<base_sha256>.pt",
-  "packet_id": "sha256:..."
-}
-```
-
-## Delta Packet Format
-
-```json
-{
-  "version": "state-delta-v0.1",
-  "model": "gpt2",
-  "base_sha256": "...",
-  "packet_id": "sha256:...",
   "delta_sha256": "...",
-  "delta_bytes": 55,
-  "delta_text": "The next issue is waiver, estoppel, and material breach."
+  "bytes": 57
 }
 ```
 
-This represents:
+Steps:
 
-```text
-continue_from(packet_id, base_sha256) with delta_text
+1. Resolve base state
+2. Verify integrity
+3. Apply delta
+4. Emit receipt
+
+---
+
+### 5. TOKENIZE — Deterministic Token Trace
+
+```bash
+cargo run -- tokenize --delta demo/delta_packet.json
 ```
 
-The inference node resolves `base_sha256`, loads the cached state blob, verifies `packet_id`, and runs only the delta tokens.
-
-## GPT-2 Mapping
-
-The earlier Python test did this:
-
-```text
-1. Compute GPT-2 KV cache for a 931-token base.
-2. Save that cache to disk as state_packet.pt.
-3. Reload the cache.
-4. Run only a 14-token delta with past_key_values.
-5. Compare logits against full 945-token recompute.
-```
-
-State Pack formalizes steps 2 and 3:
-
-```text
-state_packet.pt
-  -> state_packet_<base_sha256>.pt
-  -> state_packet_<base_sha256>.json
-```
-
-Then the delta packet supplies:
-
-```text
-base_sha256 + packet_id + delta_text
-```
-
-That is the minimal transport object for semantic packet routing.
-
-## Why This Matters
-
-Current inference is session-resident:
-
-```text
-user session -> full context -> VRAM residency
-```
-
-State Pack moves toward packetized inference:
-
-```text
-semantic address -> cached state packet -> delta-only inference burst
-```
-
-Cost shifts from total context length to residual novelty:
-
-```text
-cost proportional to H(delta)
-```
-
-not total context tokens.
-
-## Next Integration Step
-
-The next layer is a Python/Rust bridge:
-
-```text
-Rust State Pack resolves packet
-Python loads .pt KV cache
-GPT-2 runs delta tokens
-Rust records receipt
-```
-
-Target receipt:
+Output:
 
 ```json
 {
   "model": "gpt2",
-  "base_sha256": "...",
-  "packet_id": "sha256:...",
   "delta_sha256": "...",
-  "output_logits_sha256": "...",
-  "max_abs_logit_diff_vs_full": 0.00008392333984375
+  "token_count": 15,
+  "token_ids": [...],
+  "token_trace_sha256": "..."
 }
 ```
+
+This produces a **canonical token sequence** for the delta.
+
+---
+
+## Architecture
+
+```
+CREATE → VERIFY → DELTA → INFER → TOKENIZE
+```
+
+| Component | Role               |
+| --------- | ------------------ |
+| base.txt  | semantic input     |
+| blob.bin  | KV cache           |
+| manifest  | state binding      |
+| delta     | new information    |
+| receipt   | proof of execution |
+
+---
+
+## Guarantees
+
+* **Content Addressability**
+
+  * All artifacts keyed by SHA-256
+
+* **Deterministic Replay**
+
+  * Same inputs → same outputs
+
+* **Tamper Detection**
+
+  * Any corruption → verify fails
+
+* **State Deduplication**
+
+  * Identical context → identical hash
+
+* **Stateless Inference**
+
+  * No persistent sessions required
+
+---
+
+## Key Insight
+
+This system replaces:
+
+```
+persistent conversation state
+```
+
+with:
+
+```
+portable, verifiable state packets
+```
+
+---
+
+## Token Economics
+
+Traditional:
+
+```
+cost ∝ total tokens processed
+```
+
+State Pack:
+
+```
+cost ∝ delta tokens (new information)
+```
+
+---
+
+## Repository Structure
+
+```
+src/main.rs        CLI + protocol logic
+gpt2_tokenize.py   tokenizer bridge
+demo/              sample inputs + outputs
+examples/          reusable delta/base samples
+```
+
+---
+
+## Status
+
+Current version:
+
+```
+v0.1 — content-addressed state + delta + infer + token trace
+```
+
+Next:
+
+* receipt hashing (`receipt_id`)
+* logits trace
+* entropy pricing
+* distributed packet store
+
+---
+
+## License
+
+MUI
