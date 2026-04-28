@@ -96,6 +96,7 @@ struct DeltaPacket {
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Receipt {
+    receipt_id: Option<String>,
     op: String,
     ok: bool,
     packet_id: Option<String>,
@@ -115,6 +116,14 @@ fn main() -> Result<()> {
         Command::Infer { delta, store } => infer_packet(&delta, &store),
         Command::Tokenize { delta } => tokenize_delta(&delta),
     }
+}
+
+fn emit_receipt(mut receipt: Receipt) -> Result<()> {
+    receipt.receipt_id = None;
+    let canonical = serde_json::to_vec(&receipt)?;
+    receipt.receipt_id = Some(format!("sha256:{}", sha256_bytes(&canonical)));
+    println!("{}", serde_json::to_string_pretty(&receipt)?);
+    Ok(())
 }
 
 fn sha256_bytes(bytes: &[u8]) -> String {
@@ -178,6 +187,7 @@ fn create_packet(model: &str, base_path: &Path, blob_path: &Path, out_dir: &Path
     fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest)?)?;
 
     let receipt = Receipt {
+        receipt_id: None,
         op: "create".to_string(),
         ok: true,
         packet_id: Some(manifest.packet_id.clone()),
@@ -186,7 +196,7 @@ fn create_packet(model: &str, base_path: &Path, blob_path: &Path, out_dir: &Path
         delta_sha256: None,
         bytes: Some(manifest.blob_bytes),
     };
-    println!("{}", serde_json::to_string_pretty(&receipt)?);
+    emit_receipt(receipt)?;
     Ok(())
 }
 
@@ -234,6 +244,7 @@ fn verify_packet(manifest_path: &Path) -> Result<()> {
     }
 
     let receipt = Receipt {
+        receipt_id: None,
         op: "verify".to_string(),
         ok: true,
         packet_id: Some(manifest.packet_id.clone()),
@@ -242,7 +253,7 @@ fn verify_packet(manifest_path: &Path) -> Result<()> {
         delta_sha256: None,
         bytes: Some(manifest.blob_bytes),
     };
-    println!("{}", serde_json::to_string_pretty(&receipt)?);
+    emit_receipt(receipt)?;
     Ok(())
 }
 
@@ -261,6 +272,7 @@ fn create_delta(manifest_path: &Path, delta_path: &Path, out_path: &Path) -> Res
     };
     fs::write(out_path, serde_json::to_vec_pretty(&delta)?)?;
     let receipt = Receipt {
+        receipt_id: None,
         op: "delta".to_string(),
         ok: true,
         packet_id: Some(delta.packet_id.clone()),
@@ -269,7 +281,7 @@ fn create_delta(manifest_path: &Path, delta_path: &Path, out_path: &Path) -> Res
         delta_sha256: Some(delta.delta_sha256.clone()),
         bytes: Some(delta.delta_bytes),
     };
-    println!("{}", serde_json::to_string_pretty(&receipt)?);
+    emit_receipt(receipt)?;
     Ok(())
 }
 
@@ -306,6 +318,7 @@ fn infer_packet(delta_path: &Path, store: &Path) -> Result<()> {
     if actual_blob_bytes != manifest.blob_bytes { bail!("blob byte mismatch: expected {}, got {}", manifest.blob_bytes, actual_blob_bytes); }
 
     let receipt = Receipt {
+        receipt_id: None,
         op: "infer".to_string(),
         ok: true,
         packet_id: Some(delta.packet_id.clone()),
@@ -315,7 +328,7 @@ fn infer_packet(delta_path: &Path, store: &Path) -> Result<()> {
         bytes: Some(delta.delta_bytes),
     };
 
-    println!("{}", serde_json::to_string_pretty(&receipt)?);
+    emit_receipt(receipt)?;
     Ok(())
 }
 
