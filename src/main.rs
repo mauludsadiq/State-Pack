@@ -53,12 +53,16 @@ enum Command {
     },
     /// Resolve a packet by base hash inside a packet store.
     Resolve {
-        /// Packet store directory.
         #[arg(long, default_value = "packets")]
         store: PathBuf,
-        /// Base SHA-256 hex digest.
         #[arg(long)]
         base_hash: String,
+    },
+    Infer {
+        #[arg(long)]
+        delta: PathBuf,
+        #[arg(long, default_value = "packets")]
+        store: PathBuf,
     },
 }
 
@@ -103,6 +107,7 @@ fn main() -> Result<()> {
         Command::Verify { manifest } => verify_packet(&manifest),
         Command::Delta { manifest, delta, out } => create_delta(&manifest, &delta, &out),
         Command::Resolve { store, base_hash } => resolve_packet(&store, &base_hash),
+        Command::Infer { delta, store } => infer_packet(&delta, &store),
     }
 }
 
@@ -184,6 +189,11 @@ fn read_manifest(path: &Path) -> Result<StatePacketManifest> {
     Ok(serde_json::from_slice(&bytes).context("parse manifest json")?)
 }
 
+fn read_delta_packet(path: &Path) -> Result<DeltaPacket> {
+    let bytes = fs::read(path).with_context(|| format!("read delta packet {}", path.display()))?;
+    Ok(serde_json::from_slice(&bytes).context("parse delta packet json")?)
+}
+
 fn verify_packet(manifest_path: &Path) -> Result<()> {
     let manifest = read_manifest(manifest_path)?;
     if manifest.version != PACKET_VERSION {
@@ -253,6 +263,35 @@ fn create_delta(manifest_path: &Path, delta_path: &Path, out_path: &Path) -> Res
         delta_sha256: Some(delta.delta_sha256.clone()),
         bytes: Some(delta.delta_bytes),
     };
+    println!("{}", serde_json::to_string_pretty(&receipt)?);
+    Ok(())
+}
+
+fn infer_packet(delta_path: &Path, store: &Path) -> Result<()> {
+    let delta = read_delta_packet(delta_path)?;
+
+    let manifest_path = store.join(format!("state_packet_{}.json", delta.base_sha256));
+    let manifest = read_manifest(&manifest_path)?;
+
+    if manifest.packet_id != delta.packet_id {
+        bail!("delta packet_id does not match resolved state packet");
+    }
+
+    let blob_path = manifest_path.parent().ok_or_else(|| anyhow!("manifest has no parent directory"))?.join(&manifest.blob_file);
+    let (actual_blob_hash, actual_blob_bytes) = sha256_file(&blob_path)?;
+    if actual_blob_hash != manifest.blob_sha256 { bail!("blob hash mismatch: expected {}, got {}", manifest.blob_sha256, actual_blob_hash); }
+    if actual_blob_bytes != manifest.blob_bytes { bail!("blob byte mismatch: expected {}, got {}", manifest.blob_bytes, actual_blob_bytes); }
+
+    let receipt = Receipt {
+        op: "infer".to_string(),
+        ok: true,
+        packet_id: Some(delta.packet_id.clone()),
+        base_sha256: Some(delta.base_sha256.clone()),
+        blob_sha256: Some(manifest.blob_sha256.clone()),
+        delta_sha256: Some(delta.delta_sha256.clone()),
+        bytes: Some(delta.delta_bytes),
+    };
+
     println!("{}", serde_json::to_string_pretty(&receipt)?);
     Ok(())
 }
