@@ -1,0 +1,274 @@
+use anyhow::{anyhow, bail, Context, Result};
+use clap::{Parser, Subcommand};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::fs;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+
+const PACKET_VERSION: &str = "state-pack-v0.1";
+
+#[derive(Parser, Debug)]
+#[command(name = "state-pack")]
+#[command(about = "Content-addressed transformer state packet store")]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Create a content-addressed packet from base text and a cache/state blob.
+    Create {
+        /// Model identity, e.g. gpt2.
+        #[arg(long)]
+        model: String,
+        /// Base prompt/state text whose semantic state is represented by the blob.
+        #[arg(long)]
+        base: PathBuf,
+        /// Raw state blob, e.g. a torch .pt file containing past_key_values.
+        #[arg(long)]
+        blob: PathBuf,
+        /// Packet store directory.
+        #[arg(long, default_value = "packets")]
+        out: PathBuf,
+    },
+    /// Verify a packet manifest and its blob.
+    Verify {
+        /// Path to packet manifest JSON.
+        #[arg(long)]
+        manifest: PathBuf,
+    },
+    /// Create a delta packet addressed to an existing base/state packet.
+    Delta {
+        /// Path to base packet manifest JSON.
+        #[arg(long)]
+        manifest: PathBuf,
+        /// Delta text to apply after the cached state.
+        #[arg(long)]
+        delta: PathBuf,
+        /// Output delta packet JSON.
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// Resolve a packet by base hash inside a packet store.
+    Resolve {
+        /// Packet store directory.
+        #[arg(long, default_value = "packets")]
+        store: PathBuf,
+        /// Base SHA-256 hex digest.
+        #[arg(long)]
+        base_hash: String,
+    },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct StatePacketManifest {
+    version: String,
+    model: String,
+    base_sha256: String,
+    base_bytes: u64,
+    blob_sha256: String,
+    blob_bytes: u64,
+    blob_file: String,
+    packet_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct DeltaPacket {
+    version: String,
+    model: String,
+    base_sha256: String,
+    packet_id: String,
+    delta_sha256: String,
+    delta_bytes: u64,
+    delta_text: String,
+}
+
+fn main() -> Result<()> {
+    let cli = Cli::parse();
+    match cli.command {
+        Command::Create { model, base, blob, out } => create_packet(&model, &base, &blob, &out),
+        Command::Verify { manifest } => verify_packet(&manifest),
+        Command::Delta { manifest, delta, out } => create_delta(&manifest, &delta, &out),
+        Command::Resolve { store, base_hash } => resolve_packet(&store, &base_hash),
+    }
+}
+
+fn sha256_bytes(bytes: &[u8]) -> String {
+    let mut h = Sha256::new();
+    h.update(bytes);
+    hex::encode(h.finalize())
+}
+
+fn sha256_file(path: &Path) -> Result<(String, u64)> {
+    let mut f = fs::File::open(path).with_context(|| format!("open {}", path.display()))?;
+    let mut h = Sha256::new();
+    let mut n = 0u64;
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let read = f.read(&mut buf)?;
+        if read == 0 { break; }
+        h.update(&buf[..read]);
+        n += read as u64;
+    }
+    Ok((hex::encode(h.finalize()), n))
+}
+
+fn create_packet(model: &str, base_path: &Path, blob_path: &Path, out_dir: &Path) -> Result<()> {
+    fs::create_dir_all(out_dir).with_context(|| format!("create {}", out_dir.display()))?;
+
+    let base_bytes_vec = fs::read(base_path).with_context(|| format!("read base {}", base_path.display()))?;
+    let base_sha256 = sha256_bytes(&base_bytes_vec);
+    let base_bytes = base_bytes_vec.len() as u64;
+
+    let (blob_sha256, blob_bytes) = sha256_file(blob_path)?;
+
+    let blob_file = format!("state_packet_{}.pt", base_sha256);
+    let blob_dest = out_dir.join(&blob_file);
+    fs::copy(blob_path, &blob_dest)
+        .with_context(|| format!("copy blob to {}", blob_dest.display()))?;
+
+    let mut manifest = StatePacketManifest {
+        version: PACKET_VERSION.to_string(),
+        model: model.to_string(),
+        base_sha256,
+        base_bytes,
+        blob_sha256,
+        blob_bytes,
+        blob_file,
+        packet_id: String::new(),
+    };
+
+    let preimage = format!(
+        "{}|{}|{}|{}|{}|{}",
+        manifest.version,
+        manifest.model,
+        manifest.base_sha256,
+        manifest.base_bytes,
+        manifest.blob_sha256,
+        manifest.blob_bytes
+    );
+    manifest.packet_id = format!("sha256:{}", sha256_bytes(preimage.as_bytes()));
+
+    let manifest_file = format!("state_packet_{}.json", manifest.base_sha256);
+    let manifest_path = out_dir.join(&manifest_file);
+    fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest)?)?;
+
+    println!("created=true");
+    println!("packet_id={}", manifest.packet_id);
+    println!("base_sha256={}", manifest.base_sha256);
+    println!("blob_sha256={}", manifest.blob_sha256);
+    println!("manifest={}", manifest_path.display());
+    println!("blob={}", blob_dest.display());
+    Ok(())
+}
+
+fn read_manifest(path: &Path) -> Result<StatePacketManifest> {
+    let bytes = fs::read(path).with_context(|| format!("read manifest {}", path.display()))?;
+    Ok(serde_json::from_slice(&bytes).context("parse manifest json")?)
+}
+
+fn verify_packet(manifest_path: &Path) -> Result<()> {
+    let manifest = read_manifest(manifest_path)?;
+    if manifest.version != PACKET_VERSION {
+        bail!("unsupported packet version: {}", manifest.version);
+    }
+
+    let blob_path = manifest_path
+        .parent()
+        .ok_or_else(|| anyhow!("manifest has no parent directory"))?
+        .join(&manifest.blob_file);
+
+    let (actual_blob_hash, actual_blob_bytes) = sha256_file(&blob_path)?;
+    if actual_blob_hash != manifest.blob_sha256 {
+        bail!("blob hash mismatch: expected {}, got {}", manifest.blob_sha256, actual_blob_hash);
+    }
+    if actual_blob_bytes != manifest.blob_bytes {
+        bail!("blob byte mismatch: expected {}, got {}", manifest.blob_bytes, actual_blob_bytes);
+    }
+
+    let preimage = format!(
+        "{}|{}|{}|{}|{}|{}",
+        manifest.version,
+        manifest.model,
+        manifest.base_sha256,
+        manifest.base_bytes,
+        manifest.blob_sha256,
+        manifest.blob_bytes
+    );
+    let actual_packet_id = format!("sha256:{}", sha256_bytes(preimage.as_bytes()));
+    if actual_packet_id != manifest.packet_id {
+        bail!("packet_id mismatch: expected {}, got {}", manifest.packet_id, actual_packet_id);
+    }
+
+    println!("ok=true");
+    println!("packet_id={}", manifest.packet_id);
+    println!("base_sha256={}", manifest.base_sha256);
+    println!("blob_sha256={}", manifest.blob_sha256);
+    println!("blob_bytes={}", manifest.blob_bytes);
+    Ok(())
+}
+
+fn create_delta(manifest_path: &Path, delta_path: &Path, out_path: &Path) -> Result<()> {
+    let manifest = read_manifest(manifest_path)?;
+    let delta_text = fs::read_to_string(delta_path).with_context(|| format!("read delta {}", delta_path.display()))?;
+    let delta_sha256 = sha256_bytes(delta_text.as_bytes());
+    let delta = DeltaPacket {
+        version: "state-delta-v0.1".to_string(),
+        model: manifest.model,
+        base_sha256: manifest.base_sha256,
+        packet_id: manifest.packet_id,
+        delta_sha256,
+        delta_bytes: delta_text.as_bytes().len() as u64,
+        delta_text,
+    };
+    fs::write(out_path, serde_json::to_vec_pretty(&delta)?)?;
+    println!("created=true");
+    println!("delta_packet={}", out_path.display());
+    println!("delta_sha256={}", delta.delta_sha256);
+    Ok(())
+}
+
+fn resolve_packet(store: &Path, base_hash: &str) -> Result<()> {
+    let manifest = store.join(format!("state_packet_{}.json", base_hash));
+    let blob = store.join(format!("state_packet_{}.pt", base_hash));
+    if !manifest.exists() {
+        bail!("manifest not found: {}", manifest.display());
+    }
+    if !blob.exists() {
+        bail!("blob not found: {}", blob.display());
+    }
+    println!("manifest={}", manifest.display());
+    println!("blob={}", blob.display());
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sha256_known_vector() {
+        assert_eq!(
+            sha256_bytes(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
+
+    #[test]
+    fn manifest_serializes() {
+        let m = StatePacketManifest {
+            version: PACKET_VERSION.to_string(),
+            model: "gpt2".to_string(),
+            base_sha256: "00".to_string(),
+            base_bytes: 1,
+            blob_sha256: "11".to_string(),
+            blob_bytes: 2,
+            blob_file: "state_packet_00.pt".to_string(),
+            packet_id: "sha256:22".to_string(),
+        };
+        let bytes = serde_json::to_vec(&m).unwrap();
+        assert!(!bytes.is_empty());
+    }
+}
