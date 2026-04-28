@@ -273,3 +273,29 @@ Next:
 ## License
 
 MUI
+
+---
+
+## Model Support
+
+State Pack has been tested with:
+
+| Model family | Test model | Result |
+|---|---|---|
+| GPT-2 | `gpt2` | KV state packet + delta inference matches full-context logits |
+| Llama | `hf-internal-testing/tiny-random-LlamaForCausalLM` | Llama-style `past_key_values` packet + delta inference matches full-context logits |
+
+Run the Llama architecture example:
+
+    python3 examples/llama_state_packet.py
+
+Observed local result:
+
+    base_tokens: 821
+    delta_tokens: 18
+    full_tokens: 838
+    packet_bytes: 213195
+    compute_speedup_excluding_load: 3.094x
+    end_to_end_speedup_including_load: 2.826x
+    max_abs_logit_diff: 0.00024516601115465164
+
