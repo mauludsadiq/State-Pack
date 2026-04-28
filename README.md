@@ -40,6 +40,7 @@ Output:
 
 ```json
 {
+  "receipt_id": "sha256:...",
   "op": "create",
   "ok": true,
   "packet_id": "...",
@@ -66,6 +67,7 @@ Output:
 
 ```json
 {
+  "receipt_id": "sha256:...",
   "op": "verify",
   "ok": true,
   "packet_id": "...",
@@ -96,6 +98,7 @@ Output:
 
 ```json
 {
+  "receipt_id": "sha256:...",
   "op": "delta",
   "ok": true,
   "packet_id": "...",
@@ -125,6 +128,7 @@ Output:
 
 ```json
 {
+  "receipt_id": "sha256:...",
   "op": "infer",
   "ok": true,
   "packet_id": "...",
@@ -259,7 +263,7 @@ v0.1 — content-addressed state + delta + infer + token trace
 
 Next:
 
-* receipt hashing (`receipt_id`)
+* receipt chaining
 * logits trace
 * entropy pricing
 * distributed packet store
