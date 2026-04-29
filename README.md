@@ -303,7 +303,7 @@ Observed local result:
 State Pack includes a 40-step agent-loop benchmark:
 
 ```bash
-python3 examples/agent_loop_benchmark.py
+cargo run -- benchmark --script examples/agent_loop_benchmark.py
 ```
 
 Observed local result on GPT-2:
