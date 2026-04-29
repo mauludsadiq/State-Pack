@@ -360,3 +360,53 @@ State Pack loop: process base once, then only deltas
 ## License
 
 MUI
+
+
+---
+
+## Adaptive Native Benchmark
+
+State Pack now supports native benchmark execution with adaptive merge policy.
+
+```bash
+cargo run -- benchmark-native \
+  --base demo/base.txt \
+  --blob demo/blob.bin \
+  --steps 40 \
+  --merge-policy adaptive \
+  --merge-threshold 1.4 \
+  --workdir demo/native_benchmark_adaptive_t14 \
+  --input-cost-per-m 5.00 \
+  --out demo/native_benchmark_adaptive_t14.json
+```
+
+Observed result:
+
+```json
+{
+  "merge_policy": "adaptive",
+  "merge_threshold": 1.4,
+  "steps": 40,
+  "naive": {
+    "tokens_processed": 18500,
+    "avg_tokens_per_step": 462.5
+  },
+  "state_pack": {
+    "tokens_processed": 872,
+    "avg_tokens_per_step": 21.8
+  },
+  "savings": {
+    "tokens_saved": 17628,
+    "savings_percent": 95.28648648648648,
+    "estimated_usd_saved": 0.08814,
+    "input_cost_per_m": 5.0
+  }
+}
+```
+
+Adaptive merge rule:
+
+```
+merge if base_tokens / delta_tokens > merge_threshold
+```
+
