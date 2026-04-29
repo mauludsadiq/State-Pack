@@ -52,6 +52,16 @@ enum Command {
         #[arg(long)]
         out: PathBuf,
     },
+    Merge {
+        #[arg(long)]
+        manifest: PathBuf,
+        #[arg(long)]
+        delta: PathBuf,
+        #[arg(long)]
+        blob: PathBuf,
+        #[arg(long, default_value = "packets")]
+        out: PathBuf,
+    },
     /// Resolve a packet by base hash inside a packet store.
     Resolve {
         #[arg(long, default_value = "packets")]
@@ -81,6 +91,7 @@ struct StatePacketManifest {
     model: String,
     base_sha256: String,
     base_bytes: u64,
+    base_tokens: u64,
     base_file: String,
     blob_sha256: String,
     blob_bytes: u64,
@@ -137,6 +148,7 @@ fn main() -> Result<()> {
         Command::Create { model, base, blob, out } => create_packet(&model, &base, &blob, &out),
         Command::Verify { manifest } => verify_packet(&manifest),
         Command::Delta { manifest, delta, out } => create_delta(&manifest, &delta, &out),
+        Command::Merge { manifest, delta, blob, out } => merge_packet(&manifest, &delta, &blob, &out),
         Command::Resolve { store, base_hash } => resolve_packet(&store, &base_hash),
         Command::Infer { delta, store } => infer_packet(&delta, &store),
         Command::Tokenize { delta } => tokenize_delta(&delta),
@@ -178,6 +190,7 @@ fn create_packet(model: &str, base_path: &Path, blob_path: &Path, out_dir: &Path
     let base_bytes_vec = fs::read(base_path).with_context(|| format!("read base {}", base_path.display()))?;
     let base_sha256 = sha256_bytes(&base_bytes_vec);
     let base_bytes = base_bytes_vec.len() as u64;
+    let base_tokens = gpt2_token_count(base_path).unwrap_or(0);
 
     let (blob_sha256, blob_bytes) = sha256_file(blob_path)?;
 
@@ -191,6 +204,7 @@ fn create_packet(model: &str, base_path: &Path, blob_path: &Path, out_dir: &Path
         model: model.to_string(),
         base_sha256,
         base_bytes,
+        base_tokens,
         base_file: base_path.file_name().ok_or_else(|| anyhow!("base path has no file name"))?.to_string_lossy().to_string(),
         blob_sha256,
         blob_bytes,
@@ -396,8 +410,7 @@ fn infer_packet(delta_path: &Path, store: &Path) -> Result<()> {
     if actual_blob_hash != manifest.blob_sha256 { bail!("blob hash mismatch: expected {}, got {}", manifest.blob_sha256, actual_blob_hash); }
     if actual_blob_bytes != manifest.blob_bytes { bail!("blob byte mismatch: expected {}, got {}", manifest.blob_bytes, actual_blob_bytes); }
 
-    let base_file_path = store.parent().unwrap_or(Path::new(".")).join(&manifest.base_file);
-    let base_tokens = if base_file_path.exists() { gpt2_token_count(&base_file_path)? } else { 0 };
+    let base_tokens = manifest.base_tokens;
     let delta_tokens = gpt2_token_count_text(&delta.delta_text).unwrap_or(0);
 
 
@@ -426,6 +439,71 @@ fn infer_packet(delta_path: &Path, store: &Path) -> Result<()> {
         }),
     };
 
+    emit_receipt(receipt)?;
+    Ok(())
+}
+
+fn merge_packet(manifest_path: &Path, delta_path: &Path, blob_path: &Path, out_dir: &Path) -> Result<()> {
+    fs::create_dir_all(out_dir).with_context(|| format!("create {}", out_dir.display()))?;
+
+    let manifest = read_manifest(manifest_path)?;
+    let delta = read_delta_packet(delta_path)?;
+
+    if manifest.packet_id != delta.packet_id {
+        bail!("delta packet_id does not match base manifest packet_id");
+    }
+    if manifest.base_sha256 != delta.base_sha256 {
+        bail!("delta base_sha256 does not match base manifest");
+    }
+
+    let merged_base_bytes = format!("{}|{}", manifest.base_sha256, delta.delta_sha256).into_bytes();
+    let merged_base_sha256 = sha256_bytes(&merged_base_bytes);
+    let (blob_sha256, blob_bytes) = sha256_file(blob_path)?;
+
+    let blob_file = format!("state_packet_{}.pt", merged_base_sha256);
+    let blob_dest = out_dir.join(&blob_file);
+    fs::copy(blob_path, &blob_dest).with_context(|| format!("copy merged blob to {}", blob_dest.display()))?;
+
+    let mut merged = StatePacketManifest {
+        version: PACKET_VERSION.to_string(),
+        model: manifest.model.clone(),
+        base_sha256: merged_base_sha256,
+        base_bytes: manifest.base_bytes + delta.delta_bytes,
+        base_tokens: manifest.base_tokens + gpt2_token_count_text(&delta.delta_text).unwrap_or(0),
+        base_file: format!("merge:{}+{}", manifest.base_sha256, delta.delta_sha256),
+        blob_sha256,
+        blob_bytes,
+        blob_file,
+        packet_id: String::new(),
+    };
+
+    let preimage = format!(
+        "{}|{}|{}|{}|{}|{}",
+        merged.version,
+        merged.model,
+        merged.base_sha256,
+        merged.base_bytes,
+        merged.blob_sha256,
+        merged.blob_bytes
+    );
+    merged.packet_id = format!("sha256:{}", sha256_bytes(preimage.as_bytes()));
+
+    let manifest_file = format!("state_packet_{}.json", merged.base_sha256);
+    let merged_manifest_path = out_dir.join(&manifest_file);
+    fs::write(&merged_manifest_path, serde_json::to_vec_pretty(&merged)?)?;
+
+    let receipt = Receipt {
+        receipt_id: None,
+        op: "merge".to_string(),
+        ok: true,
+        packet_id: Some(merged.packet_id.clone()),
+        base_sha256: Some(merged.base_sha256.clone()),
+        blob_sha256: Some(merged.blob_sha256.clone()),
+        delta_sha256: Some(delta.delta_sha256.clone()),
+        bytes: Some(merged.blob_bytes),
+        bytes_saved: None,
+        tokens: None,
+    };
     emit_receipt(receipt)?;
     Ok(())
 }
@@ -463,6 +541,7 @@ mod tests {
             model: "gpt2".to_string(),
             base_sha256: "00".to_string(),
             base_bytes: 1,
+            base_tokens: 1,
             base_file: "base.txt".to_string(),
             blob_sha256: "11".to_string(),
             blob_bytes: 2,
