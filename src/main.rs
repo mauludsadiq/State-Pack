@@ -87,6 +87,24 @@ enum Command {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+    BenchmarkNative {
+        #[arg(long)]
+        base: PathBuf,
+        #[arg(long)]
+        blob: PathBuf,
+        #[arg(long, default_value_t = 40)]
+        steps: u64,
+        #[arg(long, default_value_t = 1)]
+        merge_every: u64,
+        #[arg(long, default_value = "gpt2")]
+        model: String,
+        #[arg(long, default_value = "native_benchmark")]
+        workdir: PathBuf,
+        #[arg(long, default_value_t = 0.0)]
+        input_cost_per_m: f64,
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -157,6 +175,7 @@ fn main() -> Result<()> {
         Command::Infer { delta, store } => infer_packet(&delta, &store),
         Command::Tokenize { delta } => tokenize_delta(&delta),
         Command::Benchmark { script, input_cost_per_m, out } => run_benchmark(&script, input_cost_per_m, out.as_deref()),
+        Command::BenchmarkNative { base, blob, steps, merge_every, model, workdir, input_cost_per_m, out } => benchmark_native(&base, &blob, steps, merge_every, &model, &workdir, input_cost_per_m, out.as_deref()),
     }
 }
 
@@ -366,6 +385,22 @@ fn gpt2_token_count(path: &Path) -> Result<u64> {
 
     let v: serde_json::Value = serde_json::from_slice(&output.stdout).context("parse gpt2_count.py json")?;
     Ok(v["token_count"].as_u64().ok_or_else(|| anyhow!("missing token_count"))?)
+}
+
+fn benchmark_native(base: &Path, blob: &Path, steps: u64, merge_every: u64, model: &str, workdir: &Path, input_cost_per_m: f64, out: Option<&Path>) -> Result<()> {
+    let result = serde_json::json!({
+        "op": "benchmark-native",
+        "model": model,
+        "base": base.display().to_string(),
+        "blob": blob.display().to_string(),
+        "steps": steps,
+        "merge_every": merge_every,
+        "workdir": workdir.display().to_string(),
+        "input_cost_per_m": input_cost_per_m,
+        "out": out.map(|p| p.display().to_string())
+    });
+    println!("{}", serde_json::to_string_pretty(&result)?);
+    Ok(())
 }
 
 fn run_benchmark(script: &Path, input_cost_per_m: f64, out: Option<&Path>) -> Result<()> {
