@@ -270,10 +270,6 @@ Next:
 
 ---
 
-## License
-
-MUI
-
 ---
 
 ## Model Support
@@ -299,3 +295,43 @@ Observed local result:
     end_to_end_speedup_including_load: 2.826x
     max_abs_logit_diff: 0.00024516601115465164
 
+
+---
+
+## Agent Loop Benchmark
+
+State Pack includes a 40-step agent-loop benchmark:
+
+```bash
+python3 examples/agent_loop_benchmark.py
+```
+
+Observed local result on GPT-2:
+
+```json
+{
+  "model": "gpt2",
+  "steps": 40,
+  "naive": {
+    "tokens_processed": 18780,
+    "seconds": 14.551613624000005
+  },
+  "state_pack": {
+    "tokens_processed": 878,
+    "seconds": 2.022669791000002
+  },
+  "savings": {
+    "tokens_saved": 17902,
+    "savings_percent": 95.3248136315229,
+    "speedup": 7.1942606196762
+  }
+}
+```
+
+This shows the core State Pack advantage for agent workloads:
+
+naive loop:      reprocess growing context every step
+State Pack loop: process base once, then only deltas
+## License
+
+MUI
