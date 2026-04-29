@@ -3,7 +3,7 @@
   "merge_policy": "adaptive",
   "merge_threshold": 1.4,
   "metadata": {
-    "receipt_id": "sha256:56e20df0a6767a33ea5e46548607812e7dc2d27a27ec0958d83779ebb16802dd"
+    "receipt_id": "sha256:4d8c13ba25ac520f8d60a2f4601f4e985ddadf139662bb4dbb623ec88b0821ac"
   },
   "model": "gpt2",
   "naive": {
@@ -783,5 +783,16 @@
     "avg_tokens_per_step": 96.5,
     "tokens_processed": 3860
   },
-  "steps": 40
+  "steps": 40,
+  "summary": {
+    "avg_tokens_per_step_naive": 2558.0,
+    "avg_tokens_per_step_state": 96.5,
+    "final_base_tokens": 3779,
+    "headline": "State Pack achieved 96.23% token savings with adaptive merging over 40 steps",
+    "merge_count": 40,
+    "savings_percent": 96.22752150117279,
+    "tokens_naive": 102320,
+    "tokens_saved": 98460,
+    "tokens_state_pack": 3860
+  }
 }
