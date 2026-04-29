@@ -77,6 +77,7 @@ struct StatePacketManifest {
     model: String,
     base_sha256: String,
     base_bytes: u64,
+    base_file: String,
     blob_sha256: String,
     blob_bytes: u64,
     blob_file: String,
@@ -104,7 +105,17 @@ struct Receipt {
     blob_sha256: Option<String>,
     delta_sha256: Option<String>,
     bytes: Option<u64>,
+    bytes_saved: Option<ByteSavings>,
     tokens: Option<TokenSavings>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct ByteSavings {
+    base: u64,
+    delta: u64,
+    processed: u64,
+    saved: u64,
+    savings_percent: f64,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -175,6 +186,7 @@ fn create_packet(model: &str, base_path: &Path, blob_path: &Path, out_dir: &Path
         model: model.to_string(),
         base_sha256,
         base_bytes,
+        base_file: base_path.file_name().ok_or_else(|| anyhow!("base path has no file name"))?.to_string_lossy().to_string(),
         blob_sha256,
         blob_bytes,
         blob_file,
@@ -205,6 +217,7 @@ fn create_packet(model: &str, base_path: &Path, blob_path: &Path, out_dir: &Path
         blob_sha256: Some(manifest.blob_sha256.clone()),
         delta_sha256: None,
         bytes: Some(manifest.blob_bytes),
+        bytes_saved: None,
         tokens: None,
     };
     emit_receipt(receipt)?;
@@ -263,6 +276,7 @@ fn verify_packet(manifest_path: &Path) -> Result<()> {
         blob_sha256: Some(manifest.blob_sha256.clone()),
         delta_sha256: None,
         bytes: Some(manifest.blob_bytes),
+        bytes_saved: None,
         tokens: None,
     };
     emit_receipt(receipt)?;
@@ -292,10 +306,43 @@ fn create_delta(manifest_path: &Path, delta_path: &Path, out_path: &Path) -> Res
         blob_sha256: None,
         delta_sha256: Some(delta.delta_sha256.clone()),
         bytes: Some(delta.delta_bytes),
+        bytes_saved: None,
         tokens: None,
     };
     emit_receipt(receipt)?;
     Ok(())
+}
+
+fn gpt2_token_count_text(text: &str) -> Result<u64> {
+    let output = ProcessCommand::new("python3")
+        .arg("gpt2_count.py")
+        .arg("--text")
+        .arg(text)
+        .output()
+        .context("run gpt2_count.py --text")?;
+
+    if !output.status.success() {
+        bail!("gpt2_count.py failed: {}", String::from_utf8_lossy(&output.stderr));
+    }
+
+    let v: serde_json::Value = serde_json::from_slice(&output.stdout).context("parse gpt2_count.py json")?;
+    Ok(v["token_count"].as_u64().ok_or_else(|| anyhow!("missing token_count"))?)
+}
+
+fn gpt2_token_count(path: &Path) -> Result<u64> {
+    let output = ProcessCommand::new("python3")
+        .arg("gpt2_count.py")
+        .arg("--text-file")
+        .arg(path)
+        .output()
+        .context("run gpt2_count.py")?;
+
+    if !output.status.success() {
+        bail!("gpt2_count.py failed: {}", String::from_utf8_lossy(&output.stderr));
+    }
+
+    let v: serde_json::Value = serde_json::from_slice(&output.stdout).context("parse gpt2_count.py json")?;
+    Ok(v["token_count"].as_u64().ok_or_else(|| anyhow!("missing token_count"))?)
 }
 
 fn tokenize_delta(delta_path: &Path) -> Result<()> {
@@ -330,6 +377,11 @@ fn infer_packet(delta_path: &Path, store: &Path) -> Result<()> {
     if actual_blob_hash != manifest.blob_sha256 { bail!("blob hash mismatch: expected {}, got {}", manifest.blob_sha256, actual_blob_hash); }
     if actual_blob_bytes != manifest.blob_bytes { bail!("blob byte mismatch: expected {}, got {}", manifest.blob_bytes, actual_blob_bytes); }
 
+    let base_file_path = store.parent().unwrap_or(Path::new(".")).join(&manifest.base_file);
+    let base_tokens = if base_file_path.exists() { gpt2_token_count(&base_file_path)? } else { 0 };
+    let delta_tokens = gpt2_token_count_text(&delta.delta_text).unwrap_or(0);
+
+
     let receipt = Receipt {
         receipt_id: None,
         op: "infer".to_string(),
@@ -339,12 +391,19 @@ fn infer_packet(delta_path: &Path, store: &Path) -> Result<()> {
         blob_sha256: Some(manifest.blob_sha256.clone()),
         delta_sha256: Some(delta.delta_sha256.clone()),
         bytes: Some(delta.delta_bytes),
-        tokens: Some(TokenSavings {
+        bytes_saved: Some(ByteSavings {
             base: manifest.base_bytes,
             delta: delta.delta_bytes,
             processed: delta.delta_bytes,
             saved: manifest.base_bytes,
             savings_percent: if manifest.base_bytes + delta.delta_bytes == 0 { 0.0 } else { (manifest.base_bytes as f64 / (manifest.base_bytes + delta.delta_bytes) as f64) * 100.0 },
+        }),
+        tokens: Some(TokenSavings {
+            base: base_tokens,
+            delta: delta_tokens,
+            processed: delta_tokens,
+            saved: base_tokens,
+            savings_percent: if base_tokens + delta_tokens == 0 { 0.0 } else { (base_tokens as f64 / (base_tokens + delta_tokens) as f64) * 100.0 },
         }),
     };
 
@@ -385,6 +444,7 @@ mod tests {
             model: "gpt2".to_string(),
             base_sha256: "00".to_string(),
             base_bytes: 1,
+            base_file: "base.txt".to_string(),
             blob_sha256: "11".to_string(),
             blob_bytes: 2,
             blob_file: "state_packet_00.pt".to_string(),
