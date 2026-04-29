@@ -6,6 +6,9 @@ use std::fs;
 use std::process::Command as ProcessCommand;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static QUIET_RECEIPTS: AtomicBool = AtomicBool::new(false);
 
 const PACKET_VERSION: &str = "state-pack-v0.1";
 
@@ -183,7 +186,9 @@ fn emit_receipt(mut receipt: Receipt) -> Result<()> {
     receipt.receipt_id = None;
     let canonical = serde_json::to_vec(&receipt)?;
     receipt.receipt_id = Some(format!("sha256:{}", sha256_bytes(&canonical)));
-    println!("{}", serde_json::to_string_pretty(&receipt)?);
+    if !QUIET_RECEIPTS.load(Ordering::SeqCst) {
+        println!("{}", serde_json::to_string_pretty(&receipt)?);
+    }
     Ok(())
 }
 
@@ -388,17 +393,107 @@ fn gpt2_token_count(path: &Path) -> Result<u64> {
 }
 
 fn benchmark_native(base: &Path, blob: &Path, steps: u64, merge_every: u64, model: &str, workdir: &Path, input_cost_per_m: f64, out: Option<&Path>) -> Result<()> {
-    let result = serde_json::json!({
+    QUIET_RECEIPTS.store(true, Ordering::SeqCst);
+    fs::create_dir_all(workdir).with_context(|| format!("create {}", workdir.display()))?;
+    let store = workdir.join("store");
+    fs::create_dir_all(&store).with_context(|| format!("create {}", store.display()))?;
+
+    create_packet(model, base, blob, &store)?;
+
+    let base_bytes = fs::read(base).with_context(|| format!("read base {}", base.display()))?;
+    let base_hash = sha256_bytes(&base_bytes);
+    let mut current_manifest = store.join(format!("state_packet_{}.json", base_hash));
+
+    let mut naive_tokens = 0u64;
+    let mut state_pack_tokens = read_manifest(&current_manifest)?.base_tokens;
+    let mut per_step = Vec::new();
+
+    for step in 1..=steps {
+        let delta_text = format!(
+            "Step {}: Tool observation says contract clause {} affects indemnity, waiver, notice, or damages.\n",
+            step, step
+        );
+        let delta_path = workdir.join(format!("delta_{}.txt", step));
+        fs::write(&delta_path, &delta_text)?;
+
+        let prior = read_manifest(&current_manifest)?;
+        let delta_tokens = gpt2_token_count_text(&delta_text).unwrap_or(0);
+        let full_tokens_this_step = prior.base_tokens + delta_tokens;
+
+        let delta_packet_path = workdir.join(format!("delta_packet_{}.json", step));
+        create_delta(&current_manifest, &delta_path, &delta_packet_path)?;
+        infer_packet(&delta_packet_path, &store)?;
+
+        naive_tokens += full_tokens_this_step;
+        state_pack_tokens += delta_tokens;
+
+        let should_merge = merge_every > 0 && step % merge_every == 0;
+        if should_merge {
+            merge_packet(&current_manifest, &delta_packet_path, blob, &store)?;
+            let delta_packet = read_delta_packet(&delta_packet_path)?;
+            let merged_hash = sha256_bytes(
+                format!("{}|{}", prior.base_sha256, delta_packet.delta_sha256).as_bytes()
+            );
+            current_manifest = store.join(format!("state_packet_{}.json", merged_hash));
+        }
+
+        let cumulative_saved = naive_tokens.saturating_sub(state_pack_tokens);
+        let cumulative_savings_percent =
+            if naive_tokens == 0 { 0.0 } else { (cumulative_saved as f64 / naive_tokens as f64) * 100.0 };
+
+        per_step.push(serde_json::json!({
+            "step": step,
+            "base_sha256": prior.base_sha256,
+            "base_tokens": prior.base_tokens,
+            "delta_tokens": delta_tokens,
+            "naive_tokens_this_step": full_tokens_this_step,
+            "state_pack_tokens_this_step": delta_tokens,
+            "tokens_saved_this_step": full_tokens_this_step.saturating_sub(delta_tokens),
+            "cumulative_naive_tokens": naive_tokens,
+            "cumulative_state_pack_tokens": state_pack_tokens,
+            "cumulative_tokens_saved": cumulative_saved,
+            "cumulative_savings_percent": cumulative_savings_percent,
+            "merged": should_merge
+        }));
+    }
+
+    let tokens_saved = naive_tokens.saturating_sub(state_pack_tokens);
+    let savings_percent =
+        if naive_tokens == 0 { 0.0 } else { (tokens_saved as f64 / naive_tokens as f64) * 100.0 };
+    let estimated_usd_saved = (tokens_saved as f64 / 1_000_000.0) * input_cost_per_m;
+
+    let mut result = serde_json::json!({
         "op": "benchmark-native",
         "model": model,
-        "base": base.display().to_string(),
-        "blob": blob.display().to_string(),
         "steps": steps,
         "merge_every": merge_every,
-        "workdir": workdir.display().to_string(),
-        "input_cost_per_m": input_cost_per_m,
-        "out": out.map(|p| p.display().to_string())
+        "naive": {
+            "tokens_processed": naive_tokens,
+            "avg_tokens_per_step": if steps == 0 { 0.0 } else { naive_tokens as f64 / steps as f64 }
+        },
+        "state_pack": {
+            "tokens_processed": state_pack_tokens,
+            "avg_tokens_per_step": if steps == 0 { 0.0 } else { state_pack_tokens as f64 / steps as f64 }
+        },
+        "savings": {
+            "tokens_saved": tokens_saved,
+            "savings_percent": savings_percent,
+            "estimated_usd_saved": estimated_usd_saved,
+            "input_cost_per_m": input_cost_per_m
+        },
+        "per_step": per_step,
+        "metadata": {}
     });
+
+    let canonical = serde_json::to_vec(&result)?;
+    result["metadata"]["receipt_id"] =
+        serde_json::Value::String(format!("sha256:{}", sha256_bytes(&canonical)));
+
+    if let Some(out_path) = out {
+        fs::write(out_path, serde_json::to_vec_pretty(&result)?)?;
+    }
+
+    QUIET_RECEIPTS.store(false, Ordering::SeqCst);
     println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())
 }
