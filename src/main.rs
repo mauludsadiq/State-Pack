@@ -69,6 +69,10 @@ enum Command {
         #[arg(long)]
         delta: PathBuf,
     },
+    Benchmark {
+        #[arg(long)]
+        script: PathBuf,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -136,6 +140,7 @@ fn main() -> Result<()> {
         Command::Resolve { store, base_hash } => resolve_packet(&store, &base_hash),
         Command::Infer { delta, store } => infer_packet(&delta, &store),
         Command::Tokenize { delta } => tokenize_delta(&delta),
+        Command::Benchmark { script } => run_benchmark(&script),
     }
 }
 
@@ -343,6 +348,20 @@ fn gpt2_token_count(path: &Path) -> Result<u64> {
 
     let v: serde_json::Value = serde_json::from_slice(&output.stdout).context("parse gpt2_count.py json")?;
     Ok(v["token_count"].as_u64().ok_or_else(|| anyhow!("missing token_count"))?)
+}
+
+fn run_benchmark(script: &Path) -> Result<()> {
+    let output = ProcessCommand::new("python3")
+        .arg(script)
+        .output()
+        .context("run benchmark script")?;
+
+    if !output.status.success() {
+        bail!("benchmark failed: {}", String::from_utf8_lossy(&output.stderr));
+    }
+
+    println!("{}", String::from_utf8_lossy(&output.stdout));
+    Ok(())
 }
 
 fn tokenize_delta(delta_path: &Path) -> Result<()> {
