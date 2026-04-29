@@ -99,6 +99,10 @@ enum Command {
         steps: u64,
         #[arg(long, default_value_t = 1)]
         merge_every: u64,
+        #[arg(long, default_value = "fixed")]
+        merge_policy: String,
+        #[arg(long, default_value_t = 4.0)]
+        merge_threshold: f64,
         #[arg(long, default_value = "gpt2")]
         model: String,
         #[arg(long, default_value = "native_benchmark")]
@@ -178,7 +182,7 @@ fn main() -> Result<()> {
         Command::Infer { delta, store } => infer_packet(&delta, &store).map(|_| ()),
         Command::Tokenize { delta } => tokenize_delta(&delta),
         Command::Benchmark { script, input_cost_per_m, out } => run_benchmark(&script, input_cost_per_m, out.as_deref()),
-        Command::BenchmarkNative { base, blob, steps, merge_every, model, workdir, input_cost_per_m, out } => benchmark_native(&base, &blob, steps, merge_every, &model, &workdir, input_cost_per_m, out.as_deref()),
+        Command::BenchmarkNative { base, blob, steps, merge_every, merge_policy, merge_threshold, model, workdir, input_cost_per_m, out } => benchmark_native(&base, &blob, steps, merge_every, &merge_policy, merge_threshold, &model, &workdir, input_cost_per_m, out.as_deref()),
     }
 }
 
@@ -391,7 +395,7 @@ fn gpt2_token_count(path: &Path) -> Result<u64> {
     Ok(v["token_count"].as_u64().ok_or_else(|| anyhow!("missing token_count"))?)
 }
 
-fn benchmark_native(base: &Path, blob: &Path, steps: u64, merge_every: u64, model: &str, workdir: &Path, input_cost_per_m: f64, out: Option<&Path>) -> Result<()> {
+fn benchmark_native(base: &Path, blob: &Path, steps: u64, merge_every: u64, merge_policy: &str, merge_threshold: f64, model: &str, workdir: &Path, input_cost_per_m: f64, out: Option<&Path>) -> Result<()> {
     QUIET_RECEIPTS.store(true, Ordering::SeqCst);
     fs::create_dir_all(workdir).with_context(|| format!("create {}", workdir.display()))?;
     let store = workdir.join("store");
@@ -426,7 +430,11 @@ fn benchmark_native(base: &Path, blob: &Path, steps: u64, merge_every: u64, mode
         naive_tokens += full_tokens_this_step;
         state_pack_tokens += delta_tokens;
 
-        let should_merge = merge_every > 0 && step % merge_every == 0;
+        let should_merge = match merge_policy {
+            "fixed" => merge_every > 0 && step % merge_every == 0,
+            "adaptive" => delta_tokens > 0 && (prior.base_tokens as f64 / delta_tokens as f64) > merge_threshold,
+            other => bail!("unsupported merge_policy: {}", other),
+        };
         let mut merge_receipt: Option<Receipt> = None;
         if should_merge {
             let receipt = merge_packet(&current_manifest, &delta_packet_path, blob, &store)?;
@@ -474,6 +482,8 @@ fn benchmark_native(base: &Path, blob: &Path, steps: u64, merge_every: u64, mode
         "model": model,
         "steps": steps,
         "merge_every": merge_every,
+        "merge_policy": merge_policy,
+        "merge_threshold": merge_threshold,
         "naive": {
             "tokens_processed": naive_tokens,
             "avg_tokens_per_step": if steps == 0 { 0.0 } else { naive_tokens as f64 / steps as f64 }
