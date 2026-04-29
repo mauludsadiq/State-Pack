@@ -310,23 +310,48 @@ Observed local result on GPT-2:
 
 ```json
 {
+  "op": "benchmark",
   "model": "gpt2",
   "steps": 40,
   "naive": {
     "tokens_processed": 18780,
-    "seconds": 14.551613624000005
+    "avg_tokens_per_step": 469.5
   },
   "state_pack": {
     "tokens_processed": 878,
-    "seconds": 2.022669791000002
+    "avg_tokens_per_step": 21.95
   },
   "savings": {
     "tokens_saved": 17902,
     "savings_percent": 95.3248136315229,
-    "speedup": 7.1942606196762
+    "speedup": 6.3579699265751906,
+    "estimated_usd_saved": 0.017902,
+    "input_cost_per_m": 1.0
+  },
+  "final_generated_output_sample": {
+    "token_id": 8600,
+    "text": "Step"
+  },
+  "per_step": [
+    {
+      "step": 1,
+      "cumulative_tokens_saved": 1,
+      "cumulative_savings_percent": 1.6666666666666667
+    },
+    {
+      "step": 40,
+      "cumulative_tokens_saved": 17902,
+      "cumulative_savings_percent": 95.3248136315229
+    }
+  ],
+  "metadata": {
+    "timestamp": "2026-04-29T07:20:07.196081+00:00",
+    "receipt_id": "sha256:..."
   }
 }
 ```
+
+The full output includes per-step graph-friendly data, cumulative savings, estimated dollar savings, a final generated token sample, and a receipt hash.
 
 This shows the core State Pack advantage for agent workloads:
 
