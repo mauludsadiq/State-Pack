@@ -103,6 +103,10 @@ enum Command {
         merge_policy: String,
         #[arg(long, default_value_t = 4.0)]
         merge_threshold: f64,
+        #[arg(long, default_value_t = 1000)]
+        base_target_tokens: u64,
+        #[arg(long, default_value_t = 0.2)]
+        delta_variance: f64,
         #[arg(long, default_value = "gpt2")]
         model: String,
         #[arg(long, default_value = "native_benchmark")]
@@ -182,7 +186,7 @@ fn main() -> Result<()> {
         Command::Infer { delta, store } => infer_packet(&delta, &store).map(|_| ()),
         Command::Tokenize { delta } => tokenize_delta(&delta),
         Command::Benchmark { script, input_cost_per_m, out } => run_benchmark(&script, input_cost_per_m, out.as_deref()),
-        Command::BenchmarkNative { base, blob, steps, merge_every, merge_policy, merge_threshold, model, workdir, input_cost_per_m, out } => benchmark_native(&base, &blob, steps, merge_every, &merge_policy, merge_threshold, &model, &workdir, input_cost_per_m, out.as_deref()),
+        Command::BenchmarkNative { base, blob, steps, merge_every, merge_policy, merge_threshold, base_target_tokens, delta_variance, model, workdir, input_cost_per_m, out } => benchmark_native(&base, &blob, steps, merge_every, &merge_policy, merge_threshold, base_target_tokens, delta_variance, &model, &workdir, input_cost_per_m, out.as_deref()),
     }
 }
 
@@ -395,15 +399,37 @@ fn gpt2_token_count(path: &Path) -> Result<u64> {
     Ok(v["token_count"].as_u64().ok_or_else(|| anyhow!("missing token_count"))?)
 }
 
-fn benchmark_native(base: &Path, blob: &Path, steps: u64, merge_every: u64, merge_policy: &str, merge_threshold: f64, model: &str, workdir: &Path, input_cost_per_m: f64, out: Option<&Path>) -> Result<()> {
+fn benchmark_native(
+    base: &Path,
+    blob: &Path,
+    steps: u64,
+    merge_every: u64,
+    merge_policy: &str,
+    merge_threshold: f64,
+    base_target_tokens: u64,
+    delta_variance: f64,
+    model: &str,
+    workdir: &Path,
+    input_cost_per_m: f64,
+    out: Option<&Path>,
+) -> Result<()> {
     QUIET_RECEIPTS.store(true, Ordering::SeqCst);
     fs::create_dir_all(workdir).with_context(|| format!("create {}", workdir.display()))?;
     let store = workdir.join("store");
     fs::create_dir_all(&store).with_context(|| format!("create {}", store.display()))?;
 
-    create_packet(model, base, blob, &store)?;
+    let raw_base = fs::read_to_string(base).with_context(|| format!("read base {}", base.display()))?;
+    let mut expanded_base = String::new();
+    while gpt2_token_count_text(&expanded_base).unwrap_or(0) < base_target_tokens {
+        expanded_base.push_str(&raw_base);
+        expanded_base.push('\n');
+    }
+    let effective_base = workdir.join("expanded_base.txt");
+    fs::write(&effective_base, expanded_base)?;
 
-    let base_bytes = fs::read(base).with_context(|| format!("read base {}", base.display()))?;
+    create_packet(model, &effective_base, blob, &store)?;
+
+    let base_bytes = fs::read(&effective_base).with_context(|| format!("read base {}", effective_base.display()))?;
     let base_hash = sha256_bytes(&base_bytes);
     let mut current_manifest = store.join(format!("state_packet_{}.json", base_hash));
 
@@ -412,10 +438,15 @@ fn benchmark_native(base: &Path, blob: &Path, steps: u64, merge_every: u64, merg
     let mut per_step = Vec::new();
 
     for step in 1..=steps {
-        let delta_text = format!(
+        let variance_band = ((delta_variance * 10.0).round() as u64).max(1);
+        let repeat_count = 1 + ((step * 17 + 13) % (variance_band + 2));
+        let mut delta_text = format!(
             "Step {}: Tool observation says contract clause {} affects indemnity, waiver, notice, or damages.\n",
             step, step
         );
+        for _ in 0..repeat_count {
+            delta_text.push_str("Additional tool note affects timing, scope, and follow-up obligations.\n");
+        }
         let delta_path = workdir.join(format!("delta_{}.txt", step));
         fs::write(&delta_path, &delta_text)?;
 

@@ -410,3 +410,29 @@ Adaptive merge rule:
 merge if base_tokens / delta_tokens > merge_threshold
 ```
 
+
+## Benchmark: Agent Loop (Realistic)
+
+40-step agent loop with GPT-2, 1200-token base context, variable-length deltas, adaptive merge:
+
+```bash
+cargo run -- benchmark-native \
+  --base demo/base.txt \
+  --blob demo/blob.bin \
+  --steps 40 \
+  --merge-policy adaptive \
+  --merge-threshold 1.4 \
+  --base-target-tokens 1200 \
+  --delta-variance 0.25 \
+  --input-cost-per-m 5.00 \
+  --out demo/benchmark.json
+```
+
+| Metric | Naive | State Pack | Savings |
+|--------|-------|------------|----------|
+| Tokens processed | 102,320 | 3,860 | 96.2% |
+| Avg tokens/step | 2,558 | 96.5 | 96.2% |
+| Est. cost @ $5/M | $0.512 | $0.019 | $0.492 |
+
+Larger shared context → higher savings. Every step is content-addressed with individual
+receipts for delta, inference, and merge operations — fully verifiable and replayable.
