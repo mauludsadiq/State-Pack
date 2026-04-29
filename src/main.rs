@@ -82,6 +82,10 @@ enum Command {
     Benchmark {
         #[arg(long)]
         script: PathBuf,
+        #[arg(long, default_value_t = 0.0)]
+        input_cost_per_m: f64,
+        #[arg(long)]
+        out: Option<PathBuf>,
     },
 }
 
@@ -152,7 +156,7 @@ fn main() -> Result<()> {
         Command::Resolve { store, base_hash } => resolve_packet(&store, &base_hash),
         Command::Infer { delta, store } => infer_packet(&delta, &store),
         Command::Tokenize { delta } => tokenize_delta(&delta),
-        Command::Benchmark { script } => run_benchmark(&script),
+        Command::Benchmark { script, input_cost_per_m, out } => run_benchmark(&script, input_cost_per_m, out.as_deref()),
     }
 }
 
@@ -364,11 +368,15 @@ fn gpt2_token_count(path: &Path) -> Result<u64> {
     Ok(v["token_count"].as_u64().ok_or_else(|| anyhow!("missing token_count"))?)
 }
 
-fn run_benchmark(script: &Path) -> Result<()> {
-    let output = ProcessCommand::new("python3")
-        .arg(script)
-        .output()
-        .context("run benchmark script")?;
+fn run_benchmark(script: &Path, input_cost_per_m: f64, out: Option<&Path>) -> Result<()> {
+    let mut cmd = ProcessCommand::new("python3");
+    cmd.arg(script)
+        .arg("--input-cost-per-m")
+        .arg(input_cost_per_m.to_string());
+    if let Some(out_path) = out {
+        cmd.arg("--out").arg(out_path);
+    }
+    let output = cmd.output().context("run benchmark script")?;
 
     if !output.status.success() {
         bail!("benchmark failed: {}", String::from_utf8_lossy(&output.stderr));
