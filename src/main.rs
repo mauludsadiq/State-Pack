@@ -172,24 +172,24 @@ fn main() -> Result<()> {
     match cli.command {
         Command::Create { model, base, blob, out } => create_packet(&model, &base, &blob, &out),
         Command::Verify { manifest } => verify_packet(&manifest),
-        Command::Delta { manifest, delta, out } => create_delta(&manifest, &delta, &out),
-        Command::Merge { manifest, delta, blob, out } => merge_packet(&manifest, &delta, &blob, &out),
+        Command::Delta { manifest, delta, out } => create_delta(&manifest, &delta, &out).map(|_| ()),
+        Command::Merge { manifest, delta, blob, out } => merge_packet(&manifest, &delta, &blob, &out).map(|_| ()),
         Command::Resolve { store, base_hash } => resolve_packet(&store, &base_hash),
-        Command::Infer { delta, store } => infer_packet(&delta, &store),
+        Command::Infer { delta, store } => infer_packet(&delta, &store).map(|_| ()),
         Command::Tokenize { delta } => tokenize_delta(&delta),
         Command::Benchmark { script, input_cost_per_m, out } => run_benchmark(&script, input_cost_per_m, out.as_deref()),
         Command::BenchmarkNative { base, blob, steps, merge_every, model, workdir, input_cost_per_m, out } => benchmark_native(&base, &blob, steps, merge_every, &model, &workdir, input_cost_per_m, out.as_deref()),
     }
 }
 
-fn emit_receipt(mut receipt: Receipt) -> Result<()> {
+fn emit_receipt(mut receipt: Receipt) -> Result<Receipt> {
     receipt.receipt_id = None;
     let canonical = serde_json::to_vec(&receipt)?;
     receipt.receipt_id = Some(format!("sha256:{}", sha256_bytes(&canonical)));
     if !QUIET_RECEIPTS.load(Ordering::SeqCst) {
         println!("{}", serde_json::to_string_pretty(&receipt)?);
     }
-    Ok(())
+    Ok(receipt)
 }
 
 fn sha256_bytes(bytes: &[u8]) -> String {
@@ -330,7 +330,7 @@ fn verify_packet(manifest_path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn create_delta(manifest_path: &Path, delta_path: &Path, out_path: &Path) -> Result<()> {
+fn create_delta(manifest_path: &Path, delta_path: &Path, out_path: &Path) -> Result<Receipt> {
     let manifest = read_manifest(manifest_path)?;
     let delta_text = fs::read_to_string(delta_path).with_context(|| format!("read delta {}", delta_path.display()))?;
     let delta_sha256 = sha256_bytes(delta_text.as_bytes());
@@ -356,8 +356,7 @@ fn create_delta(manifest_path: &Path, delta_path: &Path, out_path: &Path) -> Res
         bytes_saved: None,
         tokens: None,
     };
-    emit_receipt(receipt)?;
-    Ok(())
+    emit_receipt(receipt)
 }
 
 fn gpt2_token_count_text(text: &str) -> Result<u64> {
@@ -421,15 +420,17 @@ fn benchmark_native(base: &Path, blob: &Path, steps: u64, merge_every: u64, mode
         let full_tokens_this_step = prior.base_tokens + delta_tokens;
 
         let delta_packet_path = workdir.join(format!("delta_packet_{}.json", step));
-        create_delta(&current_manifest, &delta_path, &delta_packet_path)?;
-        infer_packet(&delta_packet_path, &store)?;
+        let delta_receipt = create_delta(&current_manifest, &delta_path, &delta_packet_path)?;
+        let infer_receipt = infer_packet(&delta_packet_path, &store)?;
 
         naive_tokens += full_tokens_this_step;
         state_pack_tokens += delta_tokens;
 
         let should_merge = merge_every > 0 && step % merge_every == 0;
+        let mut merge_receipt: Option<Receipt> = None;
         if should_merge {
-            merge_packet(&current_manifest, &delta_packet_path, blob, &store)?;
+            let receipt = merge_packet(&current_manifest, &delta_packet_path, blob, &store)?;
+            merge_receipt = Some(receipt);
             let delta_packet = read_delta_packet(&delta_packet_path)?;
             let merged_hash = sha256_bytes(
                 format!("{}|{}", prior.base_sha256, delta_packet.delta_sha256).as_bytes()
@@ -441,9 +442,15 @@ fn benchmark_native(base: &Path, blob: &Path, steps: u64, merge_every: u64, mode
         let cumulative_savings_percent =
             if naive_tokens == 0 { 0.0 } else { (cumulative_saved as f64 / naive_tokens as f64) * 100.0 };
 
+        let delta_packet_for_step = read_delta_packet(&delta_packet_path)?;
         per_step.push(serde_json::json!({
             "step": step,
             "base_sha256": prior.base_sha256,
+            "delta_sha256": delta_packet_for_step.delta_sha256,
+            "delta_text_preview": delta_text.chars().take(96).collect::<String>(),
+            "delta_receipt_id": delta_receipt.receipt_id,
+            "infer_receipt_id": infer_receipt.receipt_id,
+            "merge_receipt_id": merge_receipt.as_ref().and_then(|r| r.receipt_id.clone()),
             "base_tokens": prior.base_tokens,
             "delta_tokens": delta_tokens,
             "naive_tokens_this_step": full_tokens_this_step,
@@ -533,7 +540,7 @@ fn tokenize_delta(delta_path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn infer_packet(delta_path: &Path, store: &Path) -> Result<()> {
+fn infer_packet(delta_path: &Path, store: &Path) -> Result<Receipt> {
     let delta = read_delta_packet(delta_path)?;
 
     let manifest_path = store.join(format!("state_packet_{}.json", delta.base_sha256));
@@ -577,11 +584,10 @@ fn infer_packet(delta_path: &Path, store: &Path) -> Result<()> {
         }),
     };
 
-    emit_receipt(receipt)?;
-    Ok(())
+    emit_receipt(receipt)
 }
 
-fn merge_packet(manifest_path: &Path, delta_path: &Path, blob_path: &Path, out_dir: &Path) -> Result<()> {
+fn merge_packet(manifest_path: &Path, delta_path: &Path, blob_path: &Path, out_dir: &Path) -> Result<Receipt> {
     fs::create_dir_all(out_dir).with_context(|| format!("create {}", out_dir.display()))?;
 
     let manifest = read_manifest(manifest_path)?;
@@ -642,8 +648,7 @@ fn merge_packet(manifest_path: &Path, delta_path: &Path, blob_path: &Path, out_d
         bytes_saved: None,
         tokens: None,
     };
-    emit_receipt(receipt)?;
-    Ok(())
+    emit_receipt(receipt)
 }
 
 fn resolve_packet(store: &Path, base_hash: &str) -> Result<()> {
