@@ -436,3 +436,28 @@ cargo run -- benchmark-native \
 
 Larger shared context → higher savings. Every step is content-addressed with individual
 receipts for delta, inference, and merge operations — fully verifiable and replayable.
+
+## Benchmark: 100-Step Agent Loop
+
+```bash
+cargo run -- benchmark-native \
+  --base demo/base.txt \
+  --blob demo/blob.bin \
+  --steps 100 \
+  --merge-policy adaptive \
+  --merge-threshold 1.4 \
+  --base-target-tokens 1200 \
+  --delta-variance 0.25 \
+  --input-cost-per-m 5.00 \
+  --out demo/benchmark_100.json
+```
+
+| Metric | Naive | State Pack | Savings |
+|--------|-------|------------|----------|
+| Tokens | 332,030 | 9,602 | 97.1% |
+| Cost @ $5/M | $1.66 | $0.048 | $1.61 |
+| Avg tokens/step | 3,320 | 96 | 97.1% |
+| Merges | — | 9 | — |
+
+Adaptive merge keeps the base at ~3,300 tokens with only 9 merges across 100 steps.
+Every step is content-addressed with individual receipts — fully verifiable.
