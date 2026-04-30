@@ -103,6 +103,10 @@ enum Command {
         merge_policy: String,
         #[arg(long, default_value_t = 4.0)]
         merge_threshold: f64,
+        #[arg(long, default_value_t = 5)]
+        max_steps_without_merge: u64,
+        #[arg(long)]
+        report: Option<PathBuf>,
         #[arg(long, default_value_t = 1000)]
         base_target_tokens: u64,
         #[arg(long, default_value_t = 0.2)]
@@ -186,7 +190,7 @@ fn main() -> Result<()> {
         Command::Infer { delta, store } => infer_packet(&delta, &store).map(|_| ()),
         Command::Tokenize { delta } => tokenize_delta(&delta),
         Command::Benchmark { script, input_cost_per_m, out } => run_benchmark(&script, input_cost_per_m, out.as_deref()),
-        Command::BenchmarkNative { base, blob, steps, merge_every, merge_policy, merge_threshold, base_target_tokens, delta_variance, model, workdir, input_cost_per_m, out } => benchmark_native(&base, &blob, steps, merge_every, &merge_policy, merge_threshold, base_target_tokens, delta_variance, &model, &workdir, input_cost_per_m, out.as_deref()),
+        Command::BenchmarkNative { base, blob, steps, merge_every, merge_policy, merge_threshold, max_steps_without_merge, base_target_tokens, delta_variance, model, workdir, input_cost_per_m, out, report } => benchmark_native(&base, &blob, steps, merge_every, &merge_policy, merge_threshold, max_steps_without_merge, base_target_tokens, delta_variance, &model, &workdir, input_cost_per_m, out.as_deref(), report.as_deref()),
     }
 }
 
@@ -406,12 +410,14 @@ fn benchmark_native(
     merge_every: u64,
     merge_policy: &str,
     merge_threshold: f64,
+    max_steps_without_merge: u64,
     base_target_tokens: u64,
     delta_variance: f64,
     model: &str,
     workdir: &Path,
     input_cost_per_m: f64,
     out: Option<&Path>,
+    report: Option<&Path>,
 ) -> Result<()> {
     QUIET_RECEIPTS.store(true, Ordering::SeqCst);
     fs::create_dir_all(workdir).with_context(|| format!("create {}", workdir.display()))?;
@@ -436,6 +442,7 @@ fn benchmark_native(
     let mut naive_tokens = 0u64;
     let mut state_pack_tokens = read_manifest(&current_manifest)?.base_tokens;
     let mut per_step = Vec::new();
+    let mut steps_since_merge = 0u64;
 
     for step in 1..=steps {
         let variance_band = ((delta_variance * 10.0).round() as u64).max(1);
@@ -461,13 +468,19 @@ fn benchmark_native(
         naive_tokens += full_tokens_this_step;
         state_pack_tokens += delta_tokens;
 
+        let merge_ratio = if prior.base_tokens == 0 {
+            0.0
+        } else {
+            delta_tokens as f64 / prior.base_tokens as f64
+        };
         let should_merge = match merge_policy {
             "fixed" => merge_every > 0 && step % merge_every == 0,
-            "adaptive" => delta_tokens > 0 && (prior.base_tokens as f64 / delta_tokens as f64) > merge_threshold,
+            "adaptive" => (merge_ratio > merge_threshold && steps_since_merge >= 3) || steps_since_merge >= max_steps_without_merge,
             other => bail!("unsupported merge_policy: {}", other),
         };
         let mut merge_receipt: Option<Receipt> = None;
         if should_merge {
+            steps_since_merge = 0;
             let receipt = merge_packet(&current_manifest, &delta_packet_path, blob, &store)?;
             merge_receipt = Some(receipt);
             let delta_packet = read_delta_packet(&delta_packet_path)?;
@@ -475,6 +488,8 @@ fn benchmark_native(
                 format!("{}|{}", prior.base_sha256, delta_packet.delta_sha256).as_bytes()
             );
             current_manifest = store.join(format!("state_packet_{}.json", merged_hash));
+        } else {
+            steps_since_merge += 1;
         }
 
         let cumulative_saved = naive_tokens.saturating_sub(state_pack_tokens);
@@ -515,7 +530,7 @@ fn benchmark_native(
 
     let mut result = serde_json::json!({
         "summary": {
-    "headline": "State Pack achieved 96.23% token savings with adaptive merging over 40 steps",
+    "headline": format!("State Pack achieved {:.2}% token savings with adaptive merging over {} steps", savings_percent, steps),
     "tokens_naive": naive_tokens,
     "tokens_state_pack": state_pack_tokens,
     "tokens_saved": tokens_saved,
