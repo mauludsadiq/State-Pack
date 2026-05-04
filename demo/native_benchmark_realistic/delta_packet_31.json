@@ -1,0 +1,9 @@
+{
+  "version": "state-delta-v0.1",
+  "model": "gpt2",
+  "base_sha256": "a4391a1d34d6d71a11b37820e9ef6ebe77d605d4c80696ae6a10f7e47c35ee40",
+  "packet_id": "sha256:2a809c6157ac3e5c73153682809631687df8219a7d9b7023fd9b551d8968fb18",
+  "delta_sha256": "bf2974e28e1df8db9c85fec399ee4193de5c1f1e30861b06853428e2294b6988",
+  "delta_bytes": 168,
+  "delta_text": "Step 31: Tool observation says contract clause 31 affects indemnity, waiver, notice, or damages.\nAdditional tool note affects timing, scope, and follow-up obligations.\n"
+}

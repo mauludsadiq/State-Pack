@@ -1,0 +1,82 @@
+{
+  "merge_every": 1,
+  "metadata": {
+    "receipt_id": "sha256:34cfd41b90e486d95aca444a9491ff8d60fde538d05a29b6d2cbdf605eb04e53"
+  },
+  "model": "gpt2",
+  "naive": {
+    "avg_tokens_per_step": 74.0,
+    "tokens_processed": 222
+  },
+  "op": "benchmark-native",
+  "per_step": [
+    {
+      "base_sha256": "b5e2f9f408ac9a31751de221a6d218c02010c3428e58cffb94e99d0b7d976ed1",
+      "base_tokens": 32,
+      "cumulative_naive_tokens": 53,
+      "cumulative_savings_percent": 0.0,
+      "cumulative_state_pack_tokens": 53,
+      "cumulative_tokens_saved": 0,
+      "delta_receipt_id": "sha256:db102a16ed52b27aea027916216fee57726fc2583c3385bd194dd01ca1f7bf05",
+      "delta_sha256": "84c15a8cc6b98f04b8bd7c2220d9ccf579d3e0421241f94387433464502f26b4",
+      "delta_text_preview": "Step 1: Tool observation says contract clause 1 affects indemnity, waiver, notice, or damages.\n",
+      "delta_tokens": 21,
+      "infer_receipt_id": "sha256:098de2db56d3bb997dd93a0e63721d998f3c6a0a92215acb58b8b46f41ce1a3e",
+      "merge_receipt_id": "sha256:1ac6d6a61b3014fc05af888e36aa6887f07f14ca76539609e8faddd872e2d0b8",
+      "merged": true,
+      "naive_tokens_this_step": 53,
+      "state_pack_tokens_this_step": 21,
+      "step": 1,
+      "tokens_saved_this_step": 32
+    },
+    {
+      "base_sha256": "1f00e9692d000c4b14a3f7d2ca59a797c5c0fe11c60bd8c85a609a90bfcc3902",
+      "base_tokens": 53,
+      "cumulative_naive_tokens": 127,
+      "cumulative_savings_percent": 41.732283464566926,
+      "cumulative_state_pack_tokens": 74,
+      "cumulative_tokens_saved": 53,
+      "delta_receipt_id": "sha256:7f5f0ccca78ef7890c40c3059f80e95bca1601c8e0d23dd197ad084ae6057a95",
+      "delta_sha256": "8c8fc481b82cc52c45f04010f3356e4e37302a96d86e23ea9e798c742f4ccb63",
+      "delta_text_preview": "Step 2: Tool observation says contract clause 2 affects indemnity, waiver, notice, or damages.\n",
+      "delta_tokens": 21,
+      "infer_receipt_id": "sha256:c1900826d4076a85f814f9960cae13058b8a9127a3e48f03308d70c1d84695bd",
+      "merge_receipt_id": "sha256:5a3e274e09ac6bd8b20c945590d1ffcc1aff4c8d55e99f951f3cba13910c427b",
+      "merged": true,
+      "naive_tokens_this_step": 74,
+      "state_pack_tokens_this_step": 21,
+      "step": 2,
+      "tokens_saved_this_step": 53
+    },
+    {
+      "base_sha256": "7c57b7f864e3e19bafb6775ab9e940121a01a4b1f544415425ee17b540ea2d84",
+      "base_tokens": 74,
+      "cumulative_naive_tokens": 222,
+      "cumulative_savings_percent": 57.20720720720721,
+      "cumulative_state_pack_tokens": 95,
+      "cumulative_tokens_saved": 127,
+      "delta_receipt_id": "sha256:dcc166239a599e0c7c3a118d4ce4d6f862eba26fd053e830b0619d706abdcba4",
+      "delta_sha256": "8dcf609b6efb50152c7cf5caa58a28974b53536e5a8b0bbdd0b3ca0f209f5b99",
+      "delta_text_preview": "Step 3: Tool observation says contract clause 3 affects indemnity, waiver, notice, or damages.\n",
+      "delta_tokens": 21,
+      "infer_receipt_id": "sha256:3f94f45533e513b4a69bcd7c113e8809e6a6434da79f7e906a5c013c7722d469",
+      "merge_receipt_id": "sha256:c67d46c13191c83c099d7810e42dad3bf316c544adcdfcb40a589a6a1b435b84",
+      "merged": true,
+      "naive_tokens_this_step": 95,
+      "state_pack_tokens_this_step": 21,
+      "step": 3,
+      "tokens_saved_this_step": 74
+    }
+  ],
+  "savings": {
+    "estimated_usd_saved": 0.000127,
+    "input_cost_per_m": 1.0,
+    "savings_percent": 57.20720720720721,
+    "tokens_saved": 127
+  },
+  "state_pack": {
+    "avg_tokens_per_step": 31.666666666666668,
+    "tokens_processed": 95
+  },
+  "steps": 3
+}

@@ -1,0 +1,9 @@
+{
+  "version": "state-delta-v0.1",
+  "model": "gpt2",
+  "base_sha256": "ba52d794811f8f8b3126cbfa392d1a8971cc9e64af994922daa159aa4beecaf0",
+  "packet_id": "sha256:7d7c9f7096cc866598f291281a5f0f5248d0926aac055f9f77a6c7d864e98577",
+  "delta_sha256": "e885b31aa8145a08a224a0fbd259d4cce17f218716b170cb67e3923e99873878",
+  "delta_bytes": 95,
+  "delta_text": "Step 4: Tool observation says contract clause 4 affects indemnity, waiver, notice, or damages.\n"
+}

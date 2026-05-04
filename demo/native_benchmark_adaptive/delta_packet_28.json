@@ -1,0 +1,9 @@
+{
+  "version": "state-delta-v0.1",
+  "model": "gpt2",
+  "base_sha256": "b5e2f9f408ac9a31751de221a6d218c02010c3428e58cffb94e99d0b7d976ed1",
+  "packet_id": "sha256:22b49bcfda6177c705aaa0b422e95ca752fa3c995839d843555762beead8e6d3",
+  "delta_sha256": "70257892dbb7504b037513643d302fe2f41a6445fd96c5a7a1d1e515a41a581e",
+  "delta_bytes": 97,
+  "delta_text": "Step 28: Tool observation says contract clause 28 affects indemnity, waiver, notice, or damages.\n"
+}

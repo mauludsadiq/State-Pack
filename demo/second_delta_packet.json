@@ -1,0 +1,9 @@
+{
+  "version": "state-delta-v0.1",
+  "model": "gpt2",
+  "base_sha256": "7d606952f9ec48afeccff3af074542b0015abb659d531520b2124bdd3b36e093",
+  "packet_id": "sha256:af170a3fe9865ca0e4f7c43d2a2eebc0bc48d108ce3acdd15e68ceb7db9ff225",
+  "delta_sha256": "3c562958ad2d469665ed94d2c31eb7392f88e4cd2504f47c7b27e25c48130f31",
+  "delta_bytes": 57,
+  "delta_text": "The next issue is notice failure after the merged state.\n"
+}

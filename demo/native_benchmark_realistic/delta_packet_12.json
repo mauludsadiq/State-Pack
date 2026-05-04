@@ -1,0 +1,9 @@
+{
+  "version": "state-delta-v0.1",
+  "model": "gpt2",
+  "base_sha256": "65869e4c2af77d3ee5a9a9c8285e6b7f104707c6f0ab1f83cfee12d2c17668e6",
+  "packet_id": "sha256:f06af54757e422864074df04cf729acbb9fb54be4b76a456e109d192895e2112",
+  "delta_sha256": "24a8b20031927e370c0fbd311204e87477318165613c9d6caab705d3da7e5538",
+  "delta_bytes": 310,
+  "delta_text": "Step 12: Tool observation says contract clause 12 affects indemnity, waiver, notice, or damages.\nAdditional tool note affects timing, scope, and follow-up obligations.\nAdditional tool note affects timing, scope, and follow-up obligations.\nAdditional tool note affects timing, scope, and follow-up obligations.\n"
+}

@@ -1,0 +1,12 @@
+{
+  "version": "state-pack-v0.1",
+  "model": "gpt2",
+  "base_sha256": "5156a4bc71eec8067fdc1e1746cf5590f700f01b09cb8d091796bbd6a9ef181d",
+  "base_bytes": 8736,
+  "base_tokens": 1586,
+  "base_file": "merge:b5cf675b3941a33559187e4daced3d0bdf4363f245a00571a66696c5655da727+1c04e358d82e1e571597406f626b21b55765c70bf568371b8eb8d67a09282fc0",
+  "blob_sha256": "55443a4194a4b061d568089254f8e851b86803deca8d20923eddf000352e9f45",
+  "blob_bytes": 1048576,
+  "blob_file": "state_packet_5156a4bc71eec8067fdc1e1746cf5590f700f01b09cb8d091796bbd6a9ef181d.pt",
+  "packet_id": "sha256:b48e82e45f12c79a0832b3ad2e1079494e65dceb840e4a1ffbe51be7463683db"
+}

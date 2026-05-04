@@ -1,0 +1,9 @@
+{
+  "version": "state-delta-v0.1",
+  "model": "gpt2",
+  "base_sha256": "abecce9256c3ae14c734730becbb8842cc249bbf265e9c73ed256ab8a9a4693a",
+  "packet_id": "sha256:b2a6ce44a363ab8889d65b77446bf24eba6c7954220ab126ce6d7f62c1414fca",
+  "delta_sha256": "3bdc1192b4c341db96d5953a14f6a6dfa975d2db8a56b5d84af05e73b237430a",
+  "delta_bytes": 381,
+  "delta_text": "Step 85: Tool observation says contract clause 85 affects indemnity, waiver, notice, or damages.\nAdditional tool note affects timing, scope, and follow-up obligations.\nAdditional tool note affects timing, scope, and follow-up obligations.\nAdditional tool note affects timing, scope, and follow-up obligations.\nAdditional tool note affects timing, scope, and follow-up obligations.\n"
+}

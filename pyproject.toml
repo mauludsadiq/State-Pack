@@ -1,12 +1,24 @@
 [build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.backends.legacy:build"
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "state-pack"
 version = "0.1.0"
-description = "Content-addressed transformer state packet SDK"
+description = "The CDN for AI inference costs. 93% token reduction proven on OpenAI API."
+readme = "README.md"
 requires-python = ">=3.9"
+license = {text = "MIT"}
+keywords = ["llm", "agents", "inference", "kv-cache", "tokens", "openai"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]
 dependencies = [
     "torch>=2.0",
     "transformers>=4.30",
@@ -14,8 +26,19 @@ dependencies = [
 
 [project.optional-dependencies]
 server = ["fastapi>=0.110", "uvicorn[standard]>=0.29"]
-dev = ["pytest>=8", "httpx>=0.27"]
+dev    = ["pytest>=8", "httpx>=0.27", "build>=1.0"]
+
+[project.scripts]
+state-pack-server         = "state_pack.server:main"
+state-pack-session-server = "state_pack.session_server:main"
+
+[project.urls]
+Homepage   = "https://github.com/mauludsadiq/State-Pack"
+Repository = "https://github.com/mauludsadiq/State-Pack"
 
 [tool.setuptools.packages.find]
-where = ["."]
+where   = ["."]
 include = ["state_pack*"]
+
+[tool.setuptools.package-data]
+state_pack = ["py.typed"]
