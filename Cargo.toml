@@ -1,13 +1,29 @@
 [package]
 name = "state-pack"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Content-addressed state packet transport for cached transformer state + delta payloads"
 
+[[bin]]
+name = "state-pack"
+path = "src/main.rs"
+
+[[bin]]
+name = "state-pack-server"
+path = "src/server.rs"
+
 [dependencies]
-anyhow = "1.0"
-clap = { version = "4.5", features = ["derive"] }
-hex = "0.4"
-serde = { version = "1.0", features = ["derive"] }
+anyhow     = "1.0"
+clap       = { version = "4.5", features = ["derive"] }
+hex        = "0.4"
+serde      = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-sha2 = "0.10"
+sha2       = "0.10"
+
+# HTTP server
+axum       = "0.7"
+tokio      = { version = "1", features = ["full"] }
+tower      = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+tracing              = "0.1"
+tracing-subscriber   = { version = "0.3", features = ["env-filter"] }
