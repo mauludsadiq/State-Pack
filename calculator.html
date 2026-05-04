@@ -8,9 +8,9 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
   body {
-    font-family: 'SF Mono', 'Fira Code', monospace;
-    background: #0a0a0a;
-    color: #e0e0e0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #f8f9fa;
+    color: #1a1a2e;
     min-height: 100vh;
     display: flex;
     flex-direction: column;
@@ -19,191 +19,252 @@
     padding: 2rem;
   }
 
+  header {
+    text-align: center;
+    margin-bottom: 2rem;
+  }
+
   h1 {
-    font-size: 1.4rem;
-    font-weight: 400;
-    color: #fff;
-    margin-bottom: 0.25rem;
-    letter-spacing: 0.05em;
+    font-size: 1.6rem;
+    font-weight: 600;
+    color: #1a1a2e;
+    margin-bottom: 0.3rem;
   }
 
   .subtitle {
-    font-size: 0.8rem;
-    color: #555;
-    margin-bottom: 2.5rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    font-size: 0.85rem;
+    color: #6b7280;
+    letter-spacing: 0.03em;
   }
 
   .card {
-    background: #111;
-    border: 1px solid #222;
-    border-radius: 8px;
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
     padding: 2rem;
     width: 100%;
-    max-width: 560px;
+    max-width: 580px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
   }
 
   .field {
-    margin-bottom: 1.5rem;
+    margin-bottom: 1.4rem;
+  }
+
+  .field-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 0.45rem;
   }
 
   label {
-    display: block;
-    font-size: 0.72rem;
-    color: #666;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: #374151;
     text-transform: uppercase;
-    letter-spacing: 0.1em;
-    margin-bottom: 0.5rem;
+    letter-spacing: 0.07em;
+  }
+
+  .val {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #1a1a2e;
   }
 
   input[type=range] {
     width: 100%;
-    accent-color: #00ff88;
+    accent-color: #1a1a2e;
     cursor: pointer;
+    height: 4px;
   }
 
   select {
     width: 100%;
-    background: #0a0a0a;
-    border: 1px solid #333;
-    color: #e0e0e0;
-    padding: 0.5rem;
-    border-radius: 4px;
+    background: #f9fafb;
+    border: 1px solid #d1d5db;
+    color: #1a1a2e;
+    padding: 0.55rem 0.75rem;
+    border-radius: 6px;
     font-family: inherit;
-    font-size: 0.85rem;
+    font-size: 0.875rem;
     cursor: pointer;
+    outline: none;
   }
 
-  .val {
-    font-size: 1rem;
-    color: #00ff88;
-    float: right;
-    margin-top: -1.4rem;
+  select:focus {
+    border-color: #1a1a2e;
   }
 
   .divider {
     border: none;
-    border-top: 1px solid #222;
+    border-top: 1px solid #e5e7eb;
     margin: 1.5rem 0;
   }
 
   .results {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 1rem;
+    gap: 0.85rem;
+    margin-bottom: 1.5rem;
   }
 
   .result-box {
-    background: #0a0a0a;
-    border: 1px solid #222;
-    border-radius: 6px;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
     padding: 1rem;
     text-align: center;
   }
 
   .result-box.highlight {
-    border-color: #00ff88;
+    background: #1a1a2e;
+    border-color: #1a1a2e;
   }
 
   .result-label {
-    font-size: 0.65rem;
-    color: #555;
+    font-size: 0.68rem;
+    color: #6b7280;
     text-transform: uppercase;
-    letter-spacing: 0.1em;
-    margin-bottom: 0.4rem;
+    letter-spacing: 0.08em;
+    margin-bottom: 0.35rem;
+    font-weight: 500;
+  }
+
+  .result-box.highlight .result-label {
+    color: #9ca3af;
   }
 
   .result-value {
-    font-size: 1.4rem;
-    color: #fff;
-    font-weight: 600;
+    font-size: 1.5rem;
+    color: #1a1a2e;
+    font-weight: 700;
   }
 
-  .result-value.green { color: #00ff88; }
-  .result-value.red   { color: #ff4444; }
-
-  .savings-bar-wrap {
-    margin-top: 1.5rem;
+  .result-box.highlight .result-value {
+    color: #ffffff;
   }
 
-  .bar-label {
-    font-size: 0.65rem;
-    color: #555;
+  .result-value.muted {
+    color: #6b7280;
+  }
+
+  .bars {
+    margin-top: 0.5rem;
+  }
+
+  .bar-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.6rem;
+  }
+
+  .bar-row-label {
+    font-size: 0.7rem;
+    color: #6b7280;
+    width: 72px;
+    flex-shrink: 0;
     text-transform: uppercase;
-    letter-spacing: 0.1em;
-    margin-bottom: 0.4rem;
+    letter-spacing: 0.06em;
   }
 
   .bar-track {
-    background: #222;
+    flex: 1;
+    background: #f3f4f6;
     border-radius: 4px;
-    height: 8px;
+    height: 7px;
     overflow: hidden;
-    margin-bottom: 0.75rem;
   }
 
   .bar-fill {
     height: 100%;
     border-radius: 4px;
-    transition: width 0.3s ease;
+    transition: width 0.35s ease;
   }
 
-  .bar-naive  { background: #ff4444; }
-  .bar-sp     { background: #00ff88; }
+  .bar-naive { background: #9ca3af; }
+  .bar-sp    { background: #1a1a2e; }
+
+  .bar-tokens {
+    font-size: 0.72rem;
+    color: #6b7280;
+    width: 80px;
+    flex-shrink: 0;
+    text-align: right;
+  }
 
   .footnote {
-    font-size: 0.68rem;
-    color: #444;
+    font-size: 0.72rem;
+    color: #9ca3af;
     margin-top: 1.5rem;
-    line-height: 1.6;
+    line-height: 1.7;
     text-align: center;
   }
 
-  a { color: #00ff88; text-decoration: none; }
-  a:hover { text-decoration: underline; }
+  a { color: #1a1a2e; text-decoration: underline; }
+  a:hover { color: #374151; }
 </style>
 </head>
 <body>
 
-<h1>State Pack — Savings Calculator</h1>
-<p class="subtitle">CDN for AI inference costs</p>
+<header>
+  <h1>State Pack Savings Calculator</h1>
+  <p class="subtitle">Estimate token and cost reduction for your agent workload</p>
+</header>
 
 <div class="card">
 
   <div class="field">
-    <label>Model <span class="val" id="model-label"></span></label>
+    <div class="field-header">
+      <label>Model</label>
+    </div>
     <select id="model" onchange="calc()">
-      <option value="0.150,0.600,gpt-4o-mini">GPT-4o mini — $0.15/1M input</option>
-      <option value="2.50,10.00,gpt-4o">GPT-4o — $2.50/1M input</option>
-      <option value="15.00,75.00,o1">o1 — $15/1M input</option>
-      <option value="3.00,15.00,claude-3-5-sonnet">Claude 3.5 Sonnet — $3/1M input</option>
-      <option value="0.80,4.00,llama-3-hosted">Llama-3 hosted — $0.80/1M input</option>
+      <option value="0.150,gpt-4o-mini">GPT-4o mini — $0.15 / 1M input tokens</option>
+      <option value="2.50,gpt-4o">GPT-4o — $2.50 / 1M input tokens</option>
+      <option value="15.00,o1">o1 — $15.00 / 1M input tokens</option>
+      <option value="3.00,claude-3-5-sonnet">Claude 3.5 Sonnet — $3.00 / 1M input tokens</option>
+      <option value="0.80,llama-3-hosted">Llama-3 hosted — $0.80 / 1M input tokens</option>
     </select>
   </div>
 
   <div class="field">
-    <label>Agents running simultaneously <span class="val" id="agents-val"></span></label>
+    <div class="field-header">
+      <label>Agents running simultaneously</label>
+      <span class="val" id="agents-val">1,000</span>
+    </div>
     <input type="range" id="agents" min="1" max="10000" step="1" value="1000" oninput="calc()">
   </div>
 
   <div class="field">
-    <label>Steps per agent loop <span class="val" id="steps-val"></span></label>
+    <div class="field-header">
+      <label>Steps per agent loop</label>
+      <span class="val" id="steps-val">40</span>
+    </div>
     <input type="range" id="steps" min="5" max="200" step="5" value="40" oninput="calc()">
   </div>
 
   <div class="field">
-    <label>Base prompt tokens <span class="val" id="base-val"></span></label>
+    <div class="field-header">
+      <label>Base prompt tokens</label>
+      <span class="val" id="base-val">500</span>
+    </div>
     <input type="range" id="base" min="50" max="4000" step="50" value="500" oninput="calc()">
   </div>
 
   <div class="field">
-    <label>Delta tokens per step <span class="val" id="delta-val"></span></label>
+    <div class="field-header">
+      <label>Delta tokens per step</label>
+      <span class="val" id="delta-val">30</span>
+    </div>
     <input type="range" id="delta" min="10" max="500" step="10" value="30" oninput="calc()">
   </div>
 
   <div class="field">
-    <label>Loops per day <span class="val" id="loops-val"></span></label>
+    <div class="field-header">
+      <label>Loops per day</label>
+      <span class="val" id="loops-val">100</span>
+    </div>
     <input type="range" id="loops" min="1" max="1000" step="1" value="100" oninput="calc()">
   </div>
 
@@ -212,11 +273,11 @@
   <div class="results">
     <div class="result-box">
       <div class="result-label">Naive cost / day</div>
-      <div class="result-value red" id="naive-cost">—</div>
+      <div class="result-value muted" id="naive-cost">—</div>
     </div>
     <div class="result-box highlight">
       <div class="result-label">State Pack cost / day</div>
-      <div class="result-value green" id="sp-cost">—</div>
+      <div class="result-value" id="sp-cost">—</div>
     </div>
     <div class="result-box">
       <div class="result-label">Token savings</div>
@@ -224,19 +285,25 @@
     </div>
     <div class="result-box highlight">
       <div class="result-label">Daily saving</div>
-      <div class="result-value green" id="daily-saving">—</div>
+      <div class="result-value" id="daily-saving">—</div>
     </div>
   </div>
 
-  <div class="savings-bar-wrap">
-    <div class="bar-label">Naive tokens per loop</div>
-    <div class="bar-track"><div class="bar-fill bar-naive" id="bar-naive" style="width:100%"></div></div>
-    <div class="bar-label">State Pack tokens per loop</div>
-    <div class="bar-track"><div class="bar-fill bar-sp" id="bar-sp" style="width:5%"></div></div>
+  <div class="bars">
+    <div class="bar-row">
+      <span class="bar-row-label">Naive</span>
+      <div class="bar-track"><div class="bar-fill bar-naive" id="bar-naive" style="width:100%"></div></div>
+      <span class="bar-tokens" id="bar-naive-tok">—</span>
+    </div>
+    <div class="bar-row">
+      <span class="bar-row-label">State Pack</span>
+      <div class="bar-track"><div class="bar-fill bar-sp" id="bar-sp" style="width:5%"></div></div>
+      <span class="bar-tokens" id="bar-sp-tok">—</span>
+    </div>
   </div>
 
   <div class="footnote">
-    Savings proven across GPT-2 (124M), Qwen2.5-3B, Mistral-7B, and OpenAI API.<br>
+    Verified across GPT-2, Qwen2.5-3B, Mistral-7B, and OpenAI API (90–95% token reduction).<br>
     <a href="https://github.com/mauludsadiq/State-Pack" target="_blank">github.com/mauludsadiq/State-Pack</a>
     &nbsp;·&nbsp;
     <a href="https://pypi.org/project/state-pack/" target="_blank">pip install state-pack</a>
@@ -247,13 +314,19 @@
 <script>
 function fmt(n) {
   if (n >= 1e6) return '$' + (n/1e6).toFixed(2) + 'M';
-  if (n >= 1e3) return '$' + (n/1e3).toFixed(2) + 'K';
+  if (n >= 1e3) return '$' + (n/1e3).toFixed(1) + 'K';
   return '$' + n.toFixed(2);
 }
 
+function fmtTok(n) {
+  if (n >= 1e6) return (n/1e6).toFixed(1) + 'M tok';
+  if (n >= 1e3) return (n/1e3).toFixed(0) + 'K tok';
+  return n + ' tok';
+}
+
 function calc() {
-  const [inputCPM, outputCPM, modelName] = document.getElementById('model').value.split(',');
-  const iCPM   = parseFloat(inputCPM);
+  const parts  = document.getElementById('model').value.split(',');
+  const iCPM   = parseFloat(parts[0]);
   const agents = parseInt(document.getElementById('agents').value);
   const steps  = parseInt(document.getElementById('steps').value);
   const base   = parseInt(document.getElementById('base').value);
@@ -266,31 +339,28 @@ function calc() {
   document.getElementById('delta-val').textContent  = delta;
   document.getElementById('loops-val').textContent  = loops.toLocaleString();
 
-  // Naive: each step reprocesses base + all prior deltas
   let naiveTotal = 0;
   for (let s = 1; s <= steps; s++) {
     naiveTotal += base + delta * s;
   }
-
-  // State Pack: base once + delta each step
   const spTotal = base + delta * steps;
-
   const savedPct = ((naiveTotal - spTotal) / naiveTotal * 100).toFixed(1);
 
   const naiveCostPerLoop = naiveTotal / 1e6 * iCPM;
   const spCostPerLoop    = spTotal    / 1e6 * iCPM;
-
   const naiveDay = naiveCostPerLoop * agents * loops;
   const spDay    = spCostPerLoop    * agents * loops;
   const savedDay = naiveDay - spDay;
 
-  document.getElementById('naive-cost').textContent   = fmt(naiveDay);
-  document.getElementById('sp-cost').textContent      = fmt(spDay);
-  document.getElementById('token-savings').textContent = savedPct + '%';
-  document.getElementById('daily-saving').textContent  = fmt(savedDay);
+  document.getElementById('naive-cost').textContent    = fmt(naiveDay);
+  document.getElementById('sp-cost').textContent       = fmt(spDay);
+  document.getElementById('token-savings').textContent  = savedPct + '%';
+  document.getElementById('daily-saving').textContent   = fmt(savedDay);
 
   const ratio = spTotal / naiveTotal * 100;
-  document.getElementById('bar-sp').style.width = Math.max(ratio, 1) + '%';
+  document.getElementById('bar-sp').style.width    = Math.max(ratio, 1) + '%';
+  document.getElementById('bar-naive-tok').textContent = fmtTok(naiveTotal);
+  document.getElementById('bar-sp-tok').textContent    = fmtTok(spTotal);
 }
 
 calc();
