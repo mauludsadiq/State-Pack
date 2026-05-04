@@ -6,17 +6,32 @@ Agents pay per token. State Pack makes that cost invisible — the same way
 BlackBerry made per-character SMS costs invisible. Not by changing the model.
 Not by changing the API. By caching state at the infrastructure layer.
 
+## Benchmarks
+
+| Model | Params | Token Savings | Speedup | Blob Size |
+|-------|--------|--------------|---------|-----------|
+| GPT-2 | 124M | 95.3% | 3.96x | 0.5MB |
+| Qwen2.5-3B | 3B | 90.85% | 1.35x* | 1.2MB |
+| Mistral-7B-Instruct | 7B | 90.92% | 1.42x* | 5.7MB |
+| OpenAI API (gpt-4o-mini) | — | 92.64% | — | — |
+
+*CPU only. GPU expected 3-4x based on GPT-2 results.
+
+Token savings are architecture-independent and model-size-independent.
+90-95% across 124M to 7B parameters. The savings are structural — they
+come from the protocol, not the model.
+
 ## Proven on the OpenAI API
 
 | Metric | Naive | State Pack | Saving |
 |--------|-------|------------|--------|
-| Input tokens (20-step agent loop) | 18,990 | 1,320 | 93% |
-| Cost per loop (gpt-4o-mini) | $0.00361 | $0.00091 | 74% |
-| Cost per loop (gpt-4o) | ~$0.190 | ~$0.048 | 74% |
+| Input tokens (20-step loop) | 17,929 | 1,320 | 92.6% |
+| Cost per loop (gpt-4o-mini) | $0.00341 | $0.00091 | 73.4% |
+| Cost per loop (gpt-4o) | ~$0.180 | ~$0.048 | 73.4% |
 | Latency per step | — | 50ms | — |
 | Base cache hit (shared agents) | 0.951s | 0.003s | 99% |
 
-Real numbers. Real API. Real dollars.
+Real numbers. Real API. Reproducible with one command on your own key.
 
 ## The Math at Scale
 
@@ -42,7 +57,7 @@ state pack:  [delta only]               -> model   (cost stays flat)
 
 1. CREATE  - run base prompt once, serialize KV cache to content-addressed blob
 2. INFER   - load cached state, process delta tokens only, emit verifiable receipt
-3. MERGE   - fold deltas back into base on threshold (keeps savings compounding)
+3. COMPACT - fold accumulated deltas into fresh base (keeps savings compounding)
 
 Every artifact is SHA-256 addressed. Every operation emits a tamper-evident receipt.
 Same inputs always produce same outputs. Fully auditable.
@@ -87,7 +102,7 @@ PYTHONPATH=. python3 examples/openai_benchmark.py
 pip install state-pack
 PYTHONPATH=. python3 -m state_pack.stateless_server --store my_store --model gpt2
 
-# Create base state
+# Create base state (idempotent)
 curl -X POST http://localhost:8002/states \
   -H 'Content-Type: application/json' \
   -d '{"base_text": "You are a legal research agent..."}'
@@ -104,12 +119,6 @@ curl -X POST http://localhost:8002/compact \
   -H 'Content-Type: application/json' \
   -d '{"state_hash": "sha256:abc...", "accumulated_deltas": ["Step 1...", "Step 2..."]}'
 # -> {"new_state_hash": "sha256:ghi...", "steps_folded": 2}
-```
-
-### Session server (high-throughput, shared base)
-
-```bash
-PYTHONPATH=. python3 -m state_pack.session_server --store my_store --model gpt2 --port 8001
 ```
 
 ### Python SDK
@@ -148,10 +157,11 @@ src/main.rs            Rust CLI - content addressing, receipts, protocol
 
 | Model | Status |
 |-------|--------|
-| GPT-2 | Verified |
-| Llama (tiny) | Verified |
+| GPT-2 (124M) | Verified |
+| Qwen2.5-3B | Verified |
+| Mistral-7B-Instruct | Verified |
 | Any HuggingFace CausalLM | Works |
-| OpenAI API | Verified (93% token reduction) |
+| OpenAI API | Verified (92.6% token reduction) |
 
 ## Roadmap
 
@@ -159,12 +169,15 @@ src/main.rs            Rust CLI - content addressing, receipts, protocol
 - [x] Phase 2 - HTTP API (FastAPI, PacketStore, 43ms/step)
 - [x] Phase 3 - float16 blobs (50% smaller), DynamicCache compat
 - [x] Phase 4 - Session server (in-memory KV, base dedup, 99% cache hit)
-- [x] OpenAI integration (93% token reduction, 74% cost reduction, live API)
+- [x] OpenAI integration (92.6% token reduction, 73.4% cost reduction)
 - [x] v0.2 - Stateless inference protocol (hash chain, compact, pure function server)
-- [ ] GPU/multi-device KV portability
+- [x] Multi-model benchmarks (GPT-2, Qwen2.5-3B, Mistral-7B, OpenAI API)
+- [ ] GPU benchmarks (3-4x speedup expected)
+- [ ] Auto-compaction heuristics in SDK
 - [ ] LangChain/LangGraph native integration
 - [ ] Rust HTTP server (protocol layer in Rust, Python inference sidecar)
+- [ ] Academic paper (MLSys / arXiv)
 
 ## License
 
-MUI
+MIT
