@@ -98,4 +98,4 @@ src/main.rs      Rust CLI - content addressing, receipts, benchmarks
 
 ## License
 
-MIT
+MUI
