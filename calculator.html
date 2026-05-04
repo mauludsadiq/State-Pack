@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>State Pack — Savings Calculator</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    background: #0a0a0a;
+    color: #e0e0e0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+  }
+
+  h1 {
+    font-size: 1.4rem;
+    font-weight: 400;
+    color: #fff;
+    margin-bottom: 0.25rem;
+    letter-spacing: 0.05em;
+  }
+
+  .subtitle {
+    font-size: 0.8rem;
+    color: #555;
+    margin-bottom: 2.5rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .card {
+    background: #111;
+    border: 1px solid #222;
+    border-radius: 8px;
+    padding: 2rem;
+    width: 100%;
+    max-width: 560px;
+  }
+
+  .field {
+    margin-bottom: 1.5rem;
+  }
+
+  label {
+    display: block;
+    font-size: 0.72rem;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 0.5rem;
+  }
+
+  input[type=range] {
+    width: 100%;
+    accent-color: #00ff88;
+    cursor: pointer;
+  }
+
+  select {
+    width: 100%;
+    background: #0a0a0a;
+    border: 1px solid #333;
+    color: #e0e0e0;
+    padding: 0.5rem;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+
+  .val {
+    font-size: 1rem;
+    color: #00ff88;
+    float: right;
+    margin-top: -1.4rem;
+  }
+
+  .divider {
+    border: none;
+    border-top: 1px solid #222;
+    margin: 1.5rem 0;
+  }
+
+  .results {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+  }
+
+  .result-box {
+    background: #0a0a0a;
+    border: 1px solid #222;
+    border-radius: 6px;
+    padding: 1rem;
+    text-align: center;
+  }
+
+  .result-box.highlight {
+    border-color: #00ff88;
+  }
+
+  .result-label {
+    font-size: 0.65rem;
+    color: #555;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 0.4rem;
+  }
+
+  .result-value {
+    font-size: 1.4rem;
+    color: #fff;
+    font-weight: 600;
+  }
+
+  .result-value.green { color: #00ff88; }
+  .result-value.red   { color: #ff4444; }
+
+  .savings-bar-wrap {
+    margin-top: 1.5rem;
+  }
+
+  .bar-label {
+    font-size: 0.65rem;
+    color: #555;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 0.4rem;
+  }
+
+  .bar-track {
+    background: #222;
+    border-radius: 4px;
+    height: 8px;
+    overflow: hidden;
+    margin-bottom: 0.75rem;
+  }
+
+  .bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.3s ease;
+  }
+
+  .bar-naive  { background: #ff4444; }
+  .bar-sp     { background: #00ff88; }
+
+  .footnote {
+    font-size: 0.68rem;
+    color: #444;
+    margin-top: 1.5rem;
+    line-height: 1.6;
+    text-align: center;
+  }
+
+  a { color: #00ff88; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<h1>State Pack — Savings Calculator</h1>
+<p class="subtitle">CDN for AI inference costs</p>
+
+<div class="card">
+
+  <div class="field">
+    <label>Model <span class="val" id="model-label"></span></label>
+    <select id="model" onchange="calc()">
+      <option value="0.150,0.600,gpt-4o-mini">GPT-4o mini — $0.15/1M input</option>
+      <option value="2.50,10.00,gpt-4o">GPT-4o — $2.50/1M input</option>
+      <option value="15.00,75.00,o1">o1 — $15/1M input</option>
+      <option value="3.00,15.00,claude-3-5-sonnet">Claude 3.5 Sonnet — $3/1M input</option>
+      <option value="0.80,4.00,llama-3-hosted">Llama-3 hosted — $0.80/1M input</option>
+    </select>
+  </div>
+
+  <div class="field">
+    <label>Agents running simultaneously <span class="val" id="agents-val"></span></label>
+    <input type="range" id="agents" min="1" max="10000" step="1" value="1000" oninput="calc()">
+  </div>
+
+  <div class="field">
+    <label>Steps per agent loop <span class="val" id="steps-val"></span></label>
+    <input type="range" id="steps" min="5" max="200" step="5" value="40" oninput="calc()">
+  </div>
+
+  <div class="field">
+    <label>Base prompt tokens <span class="val" id="base-val"></span></label>
+    <input type="range" id="base" min="50" max="4000" step="50" value="500" oninput="calc()">
+  </div>
+
+  <div class="field">
+    <label>Delta tokens per step <span class="val" id="delta-val"></span></label>
+    <input type="range" id="delta" min="10" max="500" step="10" value="30" oninput="calc()">
+  </div>
+
+  <div class="field">
+    <label>Loops per day <span class="val" id="loops-val"></span></label>
+    <input type="range" id="loops" min="1" max="1000" step="1" value="100" oninput="calc()">
+  </div>
+
+  <hr class="divider">
+
+  <div class="results">
+    <div class="result-box">
+      <div class="result-label">Naive cost / day</div>
+      <div class="result-value red" id="naive-cost">—</div>
+    </div>
+    <div class="result-box highlight">
+      <div class="result-label">State Pack cost / day</div>
+      <div class="result-value green" id="sp-cost">—</div>
+    </div>
+    <div class="result-box">
+      <div class="result-label">Token savings</div>
+      <div class="result-value" id="token-savings">—</div>
+    </div>
+    <div class="result-box highlight">
+      <div class="result-label">Daily saving</div>
+      <div class="result-value green" id="daily-saving">—</div>
+    </div>
+  </div>
+
+  <div class="savings-bar-wrap">
+    <div class="bar-label">Naive tokens per loop</div>
+    <div class="bar-track"><div class="bar-fill bar-naive" id="bar-naive" style="width:100%"></div></div>
+    <div class="bar-label">State Pack tokens per loop</div>
+    <div class="bar-track"><div class="bar-fill bar-sp" id="bar-sp" style="width:5%"></div></div>
+  </div>
+
+  <div class="footnote">
+    Savings proven across GPT-2 (124M), Qwen2.5-3B, Mistral-7B, and OpenAI API.<br>
+    <a href="https://github.com/mauludsadiq/State-Pack" target="_blank">github.com/mauludsadiq/State-Pack</a>
+    &nbsp;·&nbsp;
+    <a href="https://pypi.org/project/state-pack/" target="_blank">pip install state-pack</a>
+  </div>
+
+</div>
+
+<script>
+function fmt(n) {
+  if (n >= 1e6) return '$' + (n/1e6).toFixed(2) + 'M';
+  if (n >= 1e3) return '$' + (n/1e3).toFixed(2) + 'K';
+  return '$' + n.toFixed(2);
+}
+
+function calc() {
+  const [inputCPM, outputCPM, modelName] = document.getElementById('model').value.split(',');
+  const iCPM   = parseFloat(inputCPM);
+  const agents = parseInt(document.getElementById('agents').value);
+  const steps  = parseInt(document.getElementById('steps').value);
+  const base   = parseInt(document.getElementById('base').value);
+  const delta  = parseInt(document.getElementById('delta').value);
+  const loops  = parseInt(document.getElementById('loops').value);
+
+  document.getElementById('agents-val').textContent = agents.toLocaleString();
+  document.getElementById('steps-val').textContent  = steps;
+  document.getElementById('base-val').textContent   = base.toLocaleString();
+  document.getElementById('delta-val').textContent  = delta;
+  document.getElementById('loops-val').textContent  = loops.toLocaleString();
+
+  // Naive: each step reprocesses base + all prior deltas
+  let naiveTotal = 0;
+  for (let s = 1; s <= steps; s++) {
+    naiveTotal += base + delta * s;
+  }
+
+  // State Pack: base once + delta each step
+  const spTotal = base + delta * steps;
+
+  const savedPct = ((naiveTotal - spTotal) / naiveTotal * 100).toFixed(1);
+
+  const naiveCostPerLoop = naiveTotal / 1e6 * iCPM;
+  const spCostPerLoop    = spTotal    / 1e6 * iCPM;
+
+  const naiveDay = naiveCostPerLoop * agents * loops;
+  const spDay    = spCostPerLoop    * agents * loops;
+  const savedDay = naiveDay - spDay;
+
+  document.getElementById('naive-cost').textContent   = fmt(naiveDay);
+  document.getElementById('sp-cost').textContent      = fmt(spDay);
+  document.getElementById('token-savings').textContent = savedPct + '%';
+  document.getElementById('daily-saving').textContent  = fmt(savedDay);
+
+  const ratio = spTotal / naiveTotal * 100;
+  document.getElementById('bar-sp').style.width = Math.max(ratio, 1) + '%';
+}
+
+calc();
+</script>
+</body>
+</html>
