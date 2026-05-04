@@ -144,4 +144,4 @@ src/main.rs          Rust CLI - content addressing, receipts, protocol
 
 ## License
 
-MIT
+MUI
