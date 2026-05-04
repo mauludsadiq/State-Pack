@@ -1,463 +1,101 @@
 # State Pack
 
-State Pack is a **content-addressed transformer state protocol**.
+A **content-addressed transformer state protocol** for efficient agent loops.
 
-It treats model state, context, and inference as **verifiable packets**, not sessions.
+## Results
 
----
+| Benchmark | Token Savings | Speedup | Latency |
+|-----------|--------------|---------|---------|
+| SDK agent loop (40 steps, GPT-2) | 95.3% | 3.96x | - |
+| HTTP API (40 steps, GPT-2) | 60.9% | - | 43ms |
 
-## Core Idea
+## How It Works
 
-Instead of:
+1. **CREATE** - Run base prompt through model, serialize KV cache to content-addressed blob
+2. **INFER** - Load cached KV state, process delta tokens only, emit verifiable receipt
+3. **MERGE** - Fold accumulated deltas back into base when threshold is reached
 
+Every artifact is SHA-256 addressed. Every operation emits a tamper-evident receipt.
+
+## Quickstart
+
+### Python SDK
+
+```python
+from state_pack import StatePack
+from state_pack.client import _sha256
+import torch
+
+sp = StatePack(store='my_store', model_id='gpt2')
+
+# Base pass
+receipt = sp.create(base_text, out.past_key_values, base_tokens)
+
+# Delta steps - only new tokens processed
+receipt = sp.infer(_sha256(base_text), delta_text)
+print(receipt['tokens']['saved'], 'tokens saved')
 ```
-prompt → model → response (ephemeral, opaque)
+
+### Agent Loop
+
+```python
+from state_pack.agent_loop import AgentLoop
+
+loop = AgentLoop(model, tok, store='my_store', model_id='gpt2', merge_every=10)
+results = loop.run(base_text, deltas)
+# tokens_saved: 17785, savings_pct: 95.31, speedup: 3.958
 ```
 
-State Pack does:
-
-```
-state packet + delta packet → infer → receipt
-```
-
-Everything is:
-
-* **content-addressed (SHA-256)**
-* **independently verifiable**
-* **replayable**
-
----
-
-## Lifecycle
-
-### 1. CREATE — State Packet
+### HTTP API
 
 ```bash
-cargo run -- create --model gpt2 --base demo/base.txt --blob demo/blob.bin --out demo/store
+PYTHONPATH=. python3 -m state_pack.server --store my_store --model gpt2
+
+curl -X POST http://localhost:8000/packets \
+  -H 'Content-Type: application/json' \
+  -d '{"base_text": "You are a research agent..."}'
+
+curl -X POST http://localhost:8000/infer \
+  -H 'Content-Type: application/json' \
+  -d '{"base_sha256": "<sha>", "delta_text": "Step 1: observe clause A."}'
 ```
 
-Output:
-
-```json
-{
-  "receipt_id": "sha256:...",
-  "op": "create",
-  "ok": true,
-  "packet_id": "...",
-  "base_sha256": "...",
-  "blob_sha256": "...",
-  "bytes": 1048576
-}
-```
-
-Creates:
-
-* `state_packet_<hash>.json` (manifest)
-* `state_packet_<hash>.pt` (KV cache blob)
-
----
-
-### 2. VERIFY — Integrity
+### CLI
 
 ```bash
-cargo run -- verify --manifest demo/store/state_packet_<hash>.json
+cargo run -- create --model gpt2 --base base.txt --blob blob.pt --out store/
+cargo run -- verify --manifest store/state_packet_<hash>.json
+cargo run -- benchmark-native --base base.txt --blob blob.pt --steps 40
 ```
-
-Output:
-
-```json
-{
-  "receipt_id": "sha256:...",
-  "op": "verify",
-  "ok": true,
-  "packet_id": "...",
-  "base_sha256": "...",
-  "blob_sha256": "...",
-  "bytes": 1048576
-}
-```
-
-Guarantees:
-
-* blob matches hash
-* packet_id is correct
-* state is untampered
-
----
-
-### 3. DELTA — Routing Primitive
-
-```bash
-cargo run -- delta \
-  --manifest demo/store/state_packet_<hash>.json \
-  --delta examples/delta.txt \
-  --out demo/delta_packet.json
-```
-
-Output:
-
-```json
-{
-  "receipt_id": "sha256:...",
-  "op": "delta",
-  "ok": true,
-  "packet_id": "...",
-  "base_sha256": "...",
-  "delta_sha256": "...",
-  "bytes": 57
-}
-```
-
-Delta packet contains:
-
-* pointer to state (`base_sha256`)
-* new information only
-* no KV cache
-
----
-
-### 4. INFER — Stateless Execution
-
-```bash
-cargo run -- infer \
-  --delta demo/delta_packet.json \
-  --store demo/store
-```
-
-Output:
-
-```json
-{
-  "receipt_id": "sha256:...",
-  "op": "infer",
-  "ok": true,
-  "packet_id": "...",
-  "base_sha256": "...",
-  "blob_sha256": "...",
-  "delta_sha256": "...",
-  "bytes": 57
-}
-```
-
-Steps:
-
-1. Resolve base state
-2. Verify integrity
-3. Apply delta
-4. Emit receipt
-
----
-
-### 5. TOKENIZE — Deterministic Token Trace
-
-```bash
-cargo run -- tokenize --delta demo/delta_packet.json
-```
-
-Output:
-
-```json
-{
-  "model": "gpt2",
-  "delta_sha256": "...",
-  "token_count": 15,
-  "token_ids": [...],
-  "token_trace_sha256": "..."
-}
-```
-
-This produces a **canonical token sequence** for the delta.
-
----
 
 ## Architecture
 
 ```
-CREATE → VERIFY → DELTA → INFER → TOKENIZE
+state_pack/
+  serialize.py   KV cache to .pt blob serialization
+  store.py       In-process packet store (no subprocess, 43ms/step)
+  client.py      High-level SDK (uses Rust CLI for CLI workflows)
+  agent_loop.py  Drop-in agent loop with automatic KV reuse
+  server.py      FastAPI HTTP server
+
+src/main.rs      Rust CLI - content addressing, receipts, benchmarks
 ```
-
-| Component | Role               |
-| --------- | ------------------ |
-| base.txt  | semantic input     |
-| blob.bin  | KV cache           |
-| manifest  | state binding      |
-| delta     | new information    |
-| receipt   | proof of execution |
-
----
-
-## Guarantees
-
-* **Content Addressability**
-
-  * All artifacts keyed by SHA-256
-
-* **Deterministic Replay**
-
-  * Same inputs → same outputs
-
-* **Tamper Detection**
-
-  * Any corruption → verify fails
-
-* **State Deduplication**
-
-  * Identical context → identical hash
-
-* **Stateless Inference**
-
-  * No persistent sessions required
-
----
-
-## Key Insight
-
-This system replaces:
-
-```
-persistent conversation state
-```
-
-with:
-
-```
-portable, verifiable state packets
-```
-
----
-
-## Token Economics
-
-Traditional:
-
-```
-cost ∝ total tokens processed
-```
-
-State Pack:
-
-```
-cost ∝ delta tokens (new information)
-```
-
----
-
-## Repository Structure
-
-```
-src/main.rs        CLI + protocol logic
-gpt2_tokenize.py   tokenizer bridge
-demo/              sample inputs + outputs
-examples/          reusable delta/base samples
-```
-
----
-
-## Status
-
-Current version:
-
-```
-v0.1 — content-addressed state + delta + infer + token trace
-```
-
-Next:
-
-* receipt chaining
-* logits trace
-* entropy pricing
-* distributed packet store
-
----
-
----
 
 ## Model Support
 
-State Pack has been tested with:
+| Model | Status |
+|-------|--------|
+| GPT-2 | Verified |
+| Llama (tiny) | Verified |
+| Any HuggingFace CausalLM | Should work |
 
-| Model family | Test model | Result |
-|---|---|---|
-| GPT-2 | `gpt2` | KV state packet + delta inference matches full-context logits |
-| Llama | `hf-internal-testing/tiny-random-LlamaForCausalLM` | Llama-style `past_key_values` packet + delta inference matches full-context logits |
+## Roadmap
 
-Run the Llama architecture example:
+- [x] Phase 1 - Python SDK (serialize, client, agent_loop)
+- [x] Phase 2 - HTTP API (FastAPI, PacketStore, 43ms/step)
+- [ ] Phase 3 - KV cache portability across devices (float16, quantization)
+- [ ] Phase 4 - Framework integration (LangChain, LangGraph)
 
-    python3 examples/llama_state_packet.py
-
-Observed local result:
-
-    base_tokens: 821
-    delta_tokens: 18
-    full_tokens: 838
-    packet_bytes: 213195
-    compute_speedup_excluding_load: 3.094x
-    end_to_end_speedup_including_load: 2.826x
-    max_abs_logit_diff: 0.00024516601115465164
-
-
----
-
-## Agent Loop Benchmark
-
-State Pack includes a 40-step agent-loop benchmark:
-
-```bash
-cargo run -- benchmark --script examples/agent_loop_benchmark.py
-```
-
-Observed local result on GPT-2:
-
-```json
-{
-  "op": "benchmark",
-  "model": "gpt2",
-  "steps": 40,
-  "naive": {
-    "tokens_processed": 18780,
-    "avg_tokens_per_step": 469.5
-  },
-  "state_pack": {
-    "tokens_processed": 878,
-    "avg_tokens_per_step": 21.95
-  },
-  "savings": {
-    "tokens_saved": 17902,
-    "savings_percent": 95.3248136315229,
-    "speedup": 6.3579699265751906,
-    "estimated_usd_saved": 0.017902,
-    "input_cost_per_m": 1.0
-  },
-  "final_generated_output_sample": {
-    "token_id": 8600,
-    "text": "Step"
-  },
-  "per_step": [
-    {
-      "step": 1,
-      "cumulative_tokens_saved": 1,
-      "cumulative_savings_percent": 1.6666666666666667
-    },
-    {
-      "step": 40,
-      "cumulative_tokens_saved": 17902,
-      "cumulative_savings_percent": 95.3248136315229
-    }
-  ],
-  "metadata": {
-    "timestamp": "2026-04-29T07:20:07.196081+00:00",
-    "receipt_id": "sha256:..."
-  }
-}
-```
-
-The full output includes per-step graph-friendly data, cumulative savings, estimated dollar savings, a final generated token sample, and a receipt hash.
-
-This shows the core State Pack advantage for agent workloads:
-
-naive loop:      reprocess growing context every step
-State Pack loop: process base once, then only deltas
 ## License
 
-MUI
-
-
----
-
-## Adaptive Native Benchmark
-
-State Pack now supports native benchmark execution with adaptive merge policy.
-
-```bash
-cargo run -- benchmark-native \
-  --base demo/base.txt \
-  --blob demo/blob.bin \
-  --steps 40 \
-  --merge-policy adaptive \
-  --merge-threshold 1.4 \
-  --workdir demo/native_benchmark_adaptive_t14 \
-  --input-cost-per-m 5.00 \
-  --out demo/native_benchmark_adaptive_t14.json
-```
-
-Observed result:
-
-```json
-{
-  "merge_policy": "adaptive",
-  "merge_threshold": 1.4,
-  "steps": 40,
-  "naive": {
-    "tokens_processed": 18500,
-    "avg_tokens_per_step": 462.5
-  },
-  "state_pack": {
-    "tokens_processed": 872,
-    "avg_tokens_per_step": 21.8
-  },
-  "savings": {
-    "tokens_saved": 17628,
-    "savings_percent": 95.28648648648648,
-    "estimated_usd_saved": 0.08814,
-    "input_cost_per_m": 5.0
-  }
-}
-```
-
-Adaptive merge rule:
-
-```
-merge if base_tokens / delta_tokens > merge_threshold
-```
-
-
-## Benchmark: Agent Loop (Realistic)
-
-40-step agent loop with GPT-2, 1200-token base context, variable-length deltas, adaptive merge:
-
-```bash
-cargo run -- benchmark-native \
-  --base demo/base.txt \
-  --blob demo/blob.bin \
-  --steps 40 \
-  --merge-policy adaptive \
-  --merge-threshold 1.4 \
-  --base-target-tokens 1200 \
-  --delta-variance 0.25 \
-  --input-cost-per-m 5.00 \
-  --out demo/benchmark.json
-```
-
-| Metric | Naive | State Pack | Savings |
-|--------|-------|------------|----------|
-| Tokens processed | 102,320 | 3,860 | 96.2% |
-| Avg tokens/step | 2,558 | 96.5 | 96.2% |
-| Est. cost @ $5/M | $0.512 | $0.019 | $0.492 |
-
-Larger shared context → higher savings. Every step is content-addressed with individual
-receipts for delta, inference, and merge operations — fully verifiable and replayable.
-
-## Benchmark: 100-Step Agent Loop
-
-```bash
-cargo run -- benchmark-native \
-  --base demo/base.txt \
-  --blob demo/blob.bin \
-  --steps 100 \
-  --merge-policy adaptive \
-  --merge-threshold 1.4 \
-  --base-target-tokens 1200 \
-  --delta-variance 0.25 \
-  --input-cost-per-m 5.00 \
-  --out demo/benchmark_100.json
-```
-
-| Metric | Naive | State Pack | Savings |
-|--------|-------|------------|----------|
-| Tokens | 332,030 | 9,602 | 97.1% |
-| Cost @ $5/M | $1.66 | $0.048 | $1.61 |
-| Avg tokens/step | 3,320 | 96 | 97.1% |
-| Merges | — | 9 | — |
-
-Adaptive merge keeps the base at ~3,300 tokens with only 9 merges across 100 steps.
-Every step is content-addressed with individual receipts — fully verifiable.
+MIT
