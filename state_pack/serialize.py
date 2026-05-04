@@ -25,6 +25,22 @@ from typing import Optional
 import torch
 
 BLOB_VERSION = "state-pack-v0.1"
+from transformers.cache_utils import DynamicCache
+
+
+def to_dynamic_cache(past_key_values):
+    cache = DynamicCache()
+    for layer_idx, (k, v) in enumerate(past_key_values):
+        cache.update(k, v, layer_idx)
+    return cache
+
+
+def from_dynamic_cache(cache):
+    return tuple(
+        (cache.key_cache[i], cache.value_cache[i])
+        for i in range(len(cache.key_cache))
+    )
+
 
 
 def _sha256(text: str) -> str:

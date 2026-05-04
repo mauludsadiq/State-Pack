@@ -1,11 +1,3 @@
-#!/usr/bin/env python3
-"""
-state_pack.server
-~~~~~~~~~~~~~~~~~
-FastAPI HTTP server. Uses PacketStore (pure Python, no subprocess).
-
-Start: PYTHONPATH=. python3 -m state_pack.server --store demo/api_store --model gpt2
-"""
 from __future__ import annotations
 
 import argparse
@@ -54,7 +46,7 @@ def create(req: CreateRequest):
     with torch.no_grad():
         out = _model(**ids, use_cache=True)
     base_tokens = ids["input_ids"].shape[1]
-    receipt = _ps.create(req.base_text, out.past_key_values, base_tokens)
+    receipt = _ps.create(req.base_text, out.past_key_values, base_tokens, dtype=torch.float16)
     receipt["base_sha256"] = _sha256(req.base_text)
     receipt["base_tokens"] = base_tokens
     return receipt
@@ -67,7 +59,9 @@ def infer(req: InferRequest):
     except FileNotFoundError as e:
         raise HTTPException(404, detail=str(e))
 
-    past = blob["past_key_values"]
+    from state_pack.serialize import to_dynamic_cache
+    _pkv = blob["past_key_values"]
+    past = to_dynamic_cache(tuple(tuple(t.to(torch.float32) for t in l) for l in _pkv))
     base_tokens = blob["base_tokens"]
 
     delta_ids = _tok(req.delta_text, return_tensors="pt", add_special_tokens=False)
@@ -106,7 +100,7 @@ def merge(req: MergeRequest):
         )
 
     new_tokens = base_tokens + delta_ids["input_ids"].shape[1]
-    return _ps.merge(req.base_sha256, req.delta_text, out.past_key_values, new_tokens)
+    return _ps.merge(req.base_sha256, req.delta_text, out.past_key_values, new_tokens, dtype=torch.float16)
 
 
 @app.post("/verify")

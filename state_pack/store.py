@@ -1,3 +1,5 @@
+from __future__ import annotations
+from transformers.cache_utils import DynamicCache
 """
 state_pack.store
 ~~~~~~~~~~~~~~~~
@@ -5,7 +7,6 @@ Pure Python implementation of the State Pack store protocol.
 No subprocess. Same receipt format as the Rust CLI.
 Used by the server for low-latency infer/delta/merge operations.
 """
-from __future__ import annotations
 
 import hashlib
 import json
@@ -207,3 +208,7 @@ class PacketStore:
         if not mpath.exists():
             raise FileNotFoundError(f"No manifest for {base_sha256}")
         return json.loads(mpath.read_text())
+
+
+# Default dtype for new blobs — float16 halves size with no quality loss
+DEFAULT_BLOB_DTYPE = torch.float16
