@@ -38,11 +38,11 @@ def to_dynamic_cache(past_key_values):
 
 
 def from_dynamic_cache(cache):
-    return tuple(
-        (cache.key_cache[i], cache.value_cache[i])
-        for i in range(len(cache.key_cache))
-    )
-
+    if hasattr(cache, 'to_legacy_cache'):
+        return cache.to_legacy_cache()
+    if hasattr(cache, 'key_cache'):
+        return tuple((cache.key_cache[i], cache.value_cache[i]) for i in range(len(cache.key_cache)))
+    return tuple(cache)
 
 
 def _sha256(text: str) -> str:
