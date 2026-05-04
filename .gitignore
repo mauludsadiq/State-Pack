@@ -1,5 +1,13 @@
-/target/
-.DS_Store
-demo/store/
-demo/blob.bin
+target/
+dist/
+build/
+*.egg-info/
+demo/
+__pycache__/
+*.pyc
 *.pt
+.env
+.DS_Store
+sp_store/
+packets/
+my_store/
