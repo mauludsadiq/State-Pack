@@ -29,6 +29,8 @@ from transformers.cache_utils import DynamicCache
 
 
 def to_dynamic_cache(past_key_values):
+    if hasattr(DynamicCache, 'from_legacy_cache'):
+        return DynamicCache.from_legacy_cache(past_key_values)
     cache = DynamicCache()
     for layer_idx, (k, v) in enumerate(past_key_values):
         cache.update(k, v, layer_idx)
