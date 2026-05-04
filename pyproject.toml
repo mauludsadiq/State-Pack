@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "state-pack"
-version = "0.1.1"
+version = "0.2.0"
 description = "The CDN for AI inference costs. 93% token reduction proven on OpenAI API."
 readme = "README.md"
 requires-python = ">=3.9"
