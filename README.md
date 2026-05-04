@@ -36,6 +36,10 @@ GPU inference is expected to show 3-4x wall-clock improvement over the CPU numbe
 
 When 1,000 agents share the same system prompt, the base KV cache is computed
 once and served to all. Agents 2 through 1,000 pay zero tokens for context setup.
+This is not a configuration — it is a property of content addressing.
+Identical input text always produces the same SHA-256 hash, which maps to the same
+blob on disk. One read serves every agent with that base prompt, regardless of how
+many are running concurrently. The $10,808/day saving above assumes this deduplication.
 
 [Interactive savings calculator](https://mauludsadiq.github.io/State-Pack/calculator.html)
 
@@ -70,40 +74,47 @@ on your own key.
 ## Architecture (v0.3)
 
 v0.3 introduces a split architecture: the Rust server owns the protocol layer
-(content addressing, receipts, store I/O) and Python owns inference.
+(content addressing, receipts, manifest I/O) and Python owns inference.
 This eliminates GIL contention on the hot path and brings protocol latency
 from 107ms to 9.1ms — a 12x improvement.
 
 ```
-                   +------------------+
-   agent loop ---> | Python inference |  47ms  (model bound)
-                   +------------------+
+                   +----------------------+
+   agent loop ---> |  Python inference    |  47ms  (model bound, irreducible)
+                   +----------------------+
                             |
                             v
-                   +------------------+
-                   |  Rust server     |  9ms   (protocol, receipts, store)
-                   +------------------+
+                   +----------------------+
+                   |  Rust protocol server|  9ms   (receipts, store, SHA-256)
+                   +----------------------+
                             |
                             v
-                   +------------------+
-                   |  blob store      |  SHA-256 addressed .pt files
-                   +------------------+
+                   +----------------------+
+                   |  blob store          |  content-addressed .pt files
+                   |                      |  same hash = same blob = one read
+                   |                      |  serves 1,000 concurrent agents
+                   +----------------------+
 ```
+
+The Rust server is model-agnostic. The --model flag stores a metadata string
+in the manifest for auditability. The Rust layer never loads or runs a model.
 
 ## The Stateless Protocol
 
 The server is a pure function. Zero session state. The client owns the hash chain.
 
 ```
-POST /states        { base_text }          -> { state_hash }
-POST /infer         { state_hash, delta }   -> { new_state_hash, output, savings }
-POST /merge         { state_hash, delta }   -> { new_state_hash }
-POST /compact       { state_hash, deltas }  -> { new_state_hash, steps_folded }
-GET  /states/{hash}                         -> { tokens, bytes, hot }
-GET  /health                                -> { states_cached, requests_served }
+POST /states        { base_text }                -> { state_hash }
+POST /infer         { state_hash, delta_text }   -> { new_state_hash, savings }
+POST /compact       { state_hash, deltas[] }     -> { new_state_hash, steps_folded }
+GET  /states/{hash}                              -> { tokens, bytes, hot }
+GET  /health                                     -> { states_cached, requests_served }
 ```
 
 Client chains hashes: `h0 -> infer -> h1 -> infer -> h2 -> compact -> h_fresh`
+
+Note: /merge is an internal operation used by the SDK when saving intermediate
+states to disk. It is not part of the user-facing protocol.
 
 The server cannot reconstruct a conversation even if asked to.
 The same state_hash from any client always returns the same result.
@@ -120,17 +131,15 @@ export OPENAI_API_KEY=sk-...
 PYTHONPATH=. python3 examples/openai_benchmark.py
 ```
 
-### Run the full stack (Rust protocol + Python inference)
+### Full stack: Rust protocol server + Python inference
 
 ```bash
 pip install state-pack
-
-# Start Rust protocol server
 cargo build --bin state-pack-server --release
 ./target/release/state-pack-server --store my_store --model gpt2 --port 8003
+```
 
-# Run agent loop with auto-compaction
-python3 - <<'EOF'
+```python
 from state_pack.stateless_client import StatelessClient
 from state_pack.compaction import ThresholdPolicy
 
@@ -145,10 +154,10 @@ client.set_base('You are a research agent...\n\n')
 
 for delta in steps:
     result = client.step(delta)
-    print(result['savings_pct'], result['compacted'])
+    # result: {output, savings_pct, compacted, receipt_id}
 
 print(client.stats())
-EOF
+# {tokens_saved: 3287, savings_pct: 90.8, compact_count: 2}
 ```
 
 ### Python-only (no Rust server required)
@@ -157,25 +166,18 @@ EOF
 PYTHONPATH=. python3 -m state_pack.stateless_server --store my_store --model gpt2
 ```
 
-### OpenAI API (no local model required)
-
-```bash
-export OPENAI_API_KEY=sk-...
-PYTHONPATH=. python3 examples/openai_benchmark.py
-```
-
 ## Compaction Policies
 
 ```python
 from state_pack.compaction import ThresholdPolicy, SavingsPolicy, NeverPolicy
 
-# Compact when delta tokens exceed base tokens (recommended default)
+# Compact when accumulated delta tokens exceed base tokens (recommended default)
 ThresholdPolicy(token_ratio=1.0, max_steps=20, min_steps=3)
 
 # Compact when per-step savings drop below 70%
 SavingsPolicy(min_savings_pct=70.0, max_steps=30)
 
-# Never compact (manual control)
+# Never compact — manage compaction manually
 NeverPolicy()
 ```
 
@@ -183,20 +185,19 @@ NeverPolicy()
 
 ```
 src/
-  main.rs                Rust CLI - content addressing, receipts, benchmarks
-  server.rs              Rust HTTP server - protocol layer, 9ms latency
+  main.rs                Rust CLI
+  server.rs              Rust HTTP server — protocol layer, 9ms latency
 
 state_pack/
-  stateless_client.py    Production agent loop client (Rust + Python)
+  stateless_client.py    Production client — Rust protocol + Python inference
   stateless_server.py    Python-only stateless server
   compaction.py          Auto-compaction policies
-  session_server.py      In-memory session server - base deduplication
+  session_server.py      In-memory session server — base deduplication
   server.py              Simple HTTP API
   llm.py                 Drop-in LLM wrapper
   store.py               In-process packet store
-  serialize.py           KV cache serialization - float16
-  client.py              High-level SDK
-  agent_loop.py          Agent loop benchmark
+  serialize.py           KV cache serialization — float16
+  client.py              SDK
   openai_integration.py  OpenAI API benchmark
 
 examples/
@@ -221,18 +222,18 @@ calculator.html          Interactive savings calculator
 ## Roadmap
 
 - [x] Python SDK
-- [x] HTTP API - FastAPI, 43ms/step
-- [x] float16 blobs - 50% smaller, zero quality loss
-- [x] Session server - in-memory KV, base deduplication
-- [x] OpenAI integration - 92.6% token reduction
-- [x] Stateless protocol - pure function server, client-owned hash chain
-- [x] Multi-model benchmarks - GPT-2, Qwen2.5-3B, Mistral-7B, OpenAI
-- [x] Rust HTTP server - 9.1ms protocol latency, 12x faster than Python
-- [x] Auto-compaction - ThresholdPolicy, SavingsPolicy, configurable
+- [x] HTTP API — 43ms/step
+- [x] float16 blobs — 50% smaller, zero quality loss
+- [x] Session server — in-memory KV, base deduplication
+- [x] OpenAI integration — 92.6% token reduction
+- [x] Stateless protocol — pure function server, client-owned hash chain
+- [x] Multi-model benchmarks — GPT-2, Qwen2.5-3B, Mistral-7B, OpenAI
+- [x] Rust HTTP server — 9.1ms protocol latency, 12x faster than Python
+- [x] Auto-compaction — ThresholdPolicy, SavingsPolicy, configurable
 - [x] Interactive savings calculator
 - [ ] GPU benchmarks and optimized KV transfer
 - [ ] LangChain / LangGraph integration
-- [ ] Academic paper (MLSys / arXiv)
+- [ ] Academic paper (arXiv then MLSys)
 
 ## License
 
