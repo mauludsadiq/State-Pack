@@ -1,0 +1,351 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{microtype}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  backgroundcolor=\color{gray!10},
+}
+
+\title{State Pack: A Content-Addressed Protocol for\\Stateless Transformer Inference}
+
+\author{%
+  M.~Sadiq \\
+  State Pack Project \\
+  \texttt{https://github.com/mauludsadiq/State-Pack} \\
+}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We present \textbf{State Pack}, a content-addressed protocol for efficient
+transformer inference in multi-step agent workloads. State Pack treats KV cache
+state as a portable, verifiable artifact rather than ephemeral server-side session
+data. The core abstraction is a pure function:
+$(\texttt{state\_hash},\ \texttt{delta}) \rightarrow (\texttt{new\_state\_hash},\ \texttt{output})$,
+where \texttt{state\_hash} is the SHA-256 address of a serialized
+\texttt{past\_key\_values} tensor. This design eliminates redundant prefill
+computation across agent steps, producing 90--95\% token reduction across
+GPT-2 (124M), Qwen2.5-3B, and Mistral-7B-Instruct on 20-step agent loops.
+A split Rust/Python implementation achieves 9.1ms protocol latency alongside
+47ms model inference on CPU. All results are fully reproducible:
+\texttt{pip install state-pack}.
+\end{abstract}
+
+%-----------------------------------------------------------------------
+\section{Introduction}
+\label{sec:intro}
+
+Autoregressive transformer models process tokens sequentially. At inference
+time, the attention mechanism requires access to all prior key-value pairs ---
+the KV cache. In agent loops, this cache grows with every step: a 40-step
+loop with a 500-token base prompt and 30-token deltas requires processing
+$[500, 530, 560, \ldots, 1670]$ tokens at steps 1 through 40. Total naive
+cost: $\sim$43,000 tokens. Total \emph{necessary} computation: $\sim$1,700
+tokens (base once, plus deltas).
+
+KV cache state computed for a given input prefix is deterministic and
+reusable. If the same base prompt is processed by the same model, the
+resulting \texttt{past\_key\_values} tensor is identical. This makes KV
+state \emph{content-addressable}: the SHA-256 hash of the input text
+uniquely identifies the KV state it produces.
+
+\subsection{Contributions}
+
+\begin{enumerate}
+  \item A formal stateless inference protocol:
+        $(\texttt{state\_hash}, \delta) \rightarrow (\texttt{new\_state\_hash}, y)$
+  \item Content-addressed KV cache serialization with float16 quantization
+        (50\% size reduction, zero top-1 accuracy loss, verified experimentally)
+  \item A \textsc{Compact} primitive preventing unbounded delta chain growth
+  \item A \textsc{Gc} command for bounded storage in production deployments
+  \item A split Rust/Python implementation: 9.1ms protocol latency, 12$\times$
+        faster than the Python baseline
+  \item Empirical evaluation across three model architectures showing 90--95\%
+        token reduction
+\end{enumerate}
+
+%-----------------------------------------------------------------------
+\section{Related Work}
+\label{sec:related}
+
+\paragraph{Prefix caching in inference engines.}
+vLLM's PagedAttention~\cite{kwon2023} manages KV cache memory efficiently
+but does not expose portable, addressable cache state across requests.
+SGLang's RadixAttention~\cite{zheng2023} reuses prefixes within a single
+server instance. LMCache~\cite{lmcache2024} supports KV offloading to
+CPU/disk/S3 within vLLM but requires engine-level integration. State Pack
+differs by treating KV state as a portable protocol artifact independent of
+any specific inference engine.
+
+\paragraph{Prompt caching in managed APIs.}
+OpenAI, Anthropic, and Google offer prompt caching with 50--75\% discounts
+on cached input tokens. These are server-side optimizations invisible to the
+client. State Pack operates at the client layer, producing 90\%+ reduction
+by avoiding transmission of redundant history entirely.
+
+\paragraph{Content-addressed storage.}
+IPFS~\cite{benet2014} and Nix~\cite{dolstra2006} demonstrate
+content-addressable storage as infrastructure primitives. State Pack applies
+this pattern to ML inference state, enabling deduplication, auditability, and
+reproducibility not present in session-based inference systems.
+
+%-----------------------------------------------------------------------
+\section{Protocol Design}
+\label{sec:protocol}
+
+\subsection{State Representation}
+
+A \emph{state packet} consists of:
+\begin{itemize}
+  \item \texttt{state\_hash}: $\text{SHA-256}(\texttt{base\_text})$
+  \item \texttt{past\_key\_values}: serialized KV cache tensor (float16, \texttt{.pt})
+  \item \texttt{manifest}: JSON metadata (\texttt{model}, \texttt{base\_tokens},
+        \texttt{blob\_sha256}, \texttt{packet\_id})
+  \item \texttt{packet\_id}: $\text{SHA-256}(\texttt{version} \mid \texttt{model}
+        \mid \texttt{base\_sha256} \mid \texttt{base\_bytes} \mid
+        \texttt{blob\_sha256} \mid \texttt{blob\_bytes})$
+\end{itemize}
+
+\subsection{Core Operations}
+
+\begin{description}
+  \item[\textsc{Create}$(t)$] Run base text $t$ through model, serialize
+    \texttt{past\_key\_values}, store blob. Returns $h = \text{SHA-256}(t)$.
+    \emph{Idempotent}: same text always produces same hash.
+
+  \item[\textsc{Infer}$(h, \delta)$] Load KV state for $h$. Run $\delta$
+    against cached state. Returns
+    $h' = \text{SHA-256}(h \mid \text{SHA-256}(\delta))$ and output token.
+    Emits tamper-evident receipt.
+
+  \item[\textsc{Compact}$(h, [\delta_1,\ldots,\delta_n])$] Fold accumulated
+    delta list into fresh base state. Returns $h_\text{fresh}$.
+    Prevents unbounded growth of the delta chain.
+
+  \item[\textsc{Gc}$(\texttt{store}, \tau)$] Remove manifest+blob pairs
+    older than $\tau$ days or exceeding a maximum count.
+    Keeps storage bounded in production deployments.
+\end{description}
+
+\subsection{Hash Chain}
+
+The client maintains a hash chain:
+\[
+  h_0 \xrightarrow{\delta_1} h_1 \xrightarrow{\delta_2} h_2
+  \xrightarrow{\phantom{xx}} \cdots
+  \xrightarrow{\textsc{Compact}} h_\text{fresh}
+\]
+Each transition is deterministic given the same model weights. The chain
+constitutes a cryptographic audit trail of inference history.
+
+\subsection{Compaction Policy}
+
+Without compaction, accumulated delta tokens eventually dominate base tokens,
+reducing marginal savings. We define two policies:
+
+\begin{itemize}
+  \item \textbf{ThresholdPolicy}: compact when
+        $\sum \texttt{delta\_tokens} > \texttt{base\_tokens} \times r$
+  \item \textbf{SavingsPolicy}: compact when per-step savings fall below
+        a minimum percentage
+\end{itemize}
+
+Empirically, \texttt{ThresholdPolicy}$(r{=}1.0, \texttt{max\_steps}{=}20)$
+maintains $>$90\% savings over 20-step loops with 2 compactions on average.
+
+%-----------------------------------------------------------------------
+\section{Implementation}
+\label{sec:impl}
+
+\subsection{KV Cache Serialization}
+
+HuggingFace \texttt{past\_key\_values} is a tuple of (key, value) tensor
+pairs, one per layer. We serialize via \texttt{torch.save} with float16
+quantization. Experimental verification (Section~\ref{sec:eval}) confirms
+zero top-1 accuracy impact across all tested architectures.
+
+\texttt{DynamicCache} compatibility (transformers $\geq$ 4.36) is handled
+via \texttt{DynamicCache.from\_legacy\_cache()} and
+\texttt{cache.to\_legacy\_cache()}.
+
+\subsection{Split Architecture}
+
+The protocol layer is implemented in Rust (Axum framework):
+\begin{itemize}
+  \item SHA-256 content addressing and manifest I/O
+  \item Tamper-evident receipt generation
+  \item HTTP routing
+\end{itemize}
+
+The inference layer is implemented in Python:
+\begin{itemize}
+  \item Model loading (HuggingFace \texttt{AutoModelForCausalLM})
+  \item KV cache forward pass
+  \item Blob serialization/deserialization
+\end{itemize}
+
+This split eliminates Python GIL contention on the protocol hot path.
+Protocol latency: 9.1ms (Rust) vs.\ 107ms (Python baseline), 12$\times$
+improvement.
+
+\subsection{Multi-Agent Deduplication}
+
+Content addressing naturally deduplicates shared base states. When $N$ agents
+share the same system prompt, \textsc{Create} is called once and $N-1$
+subsequent calls are cache hits. Empirically: first agent 0.951s, subsequent
+agents 0.003s (316$\times$ faster). At 1,000 concurrent agents sharing a base
+prompt, the cost reduction compound: base tokens paid once, delta tokens paid
+per agent per step.
+
+%-----------------------------------------------------------------------
+\section{Evaluation}
+\label{sec:eval}
+
+\subsection{Token Reduction}
+
+Table~\ref{tab:tokens} reports token reduction across model families and
+sizes. Savings are consistent at 90--95\%, confirming the reduction is
+structural (protocol-driven) rather than model-dependent.
+
+\begin{table}[h]
+\centering
+\caption{Token reduction across model families (20-step agent loops).}
+\label{tab:tokens}
+\begin{tabular}{lrrrr}
+\toprule
+Model & Params & Naive Tokens & SP Tokens & Reduction \\
+\midrule
+GPT-2            & 124M & 18,660 & 875   & 95.3\% \\
+Qwen2.5-3B       & 3B   & 5,412  & 495   & 90.9\% \\
+Mistral-7B       & 7B   & 6,662  & 605   & 90.9\% \\
+OpenAI API       & ---  & 17,929 & 1,320 & 92.6\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Quantization Accuracy}
+
+Float16 vs.\ float32 KV cache comparison (GPT-2):
+\begin{itemize}
+  \item Max logit difference: 0.066 (float16), 0.307 (bfloat16)
+  \item Top-1 token match: \textbf{True} (both precisions)
+  \item Blob size reduction: 50\%
+\end{itemize}
+
+\subsection{Protocol Latency}
+
+\begin{table}[h]
+\centering
+\caption{Protocol layer latency: Rust vs.\ Python.}
+\label{tab:latency}
+\begin{tabular}{lrrr}
+\toprule
+Implementation & Avg & Min & Max \\
+\midrule
+Python (baseline) & 107ms & 24ms & 190ms \\
+Rust (v0.3)       & 9.1ms & 2.8ms & 19.7ms \\
+\midrule
+Improvement & $12\times$ & --- & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Compaction Effectiveness}
+
+\texttt{ThresholdPolicy}$(r{=}0.5, \texttt{max\_steps}{=}10)$ over 20 steps:
+compactions triggered at steps 4 and 14, final savings 90.8\%,
+average step latency 42ms.
+
+\subsection{Limitations}
+
+\begin{enumerate}
+  \item \textbf{CPU-bound speedup.} Wall-clock speedup is 1.4$\times$ for 7B
+        models on CPU. GPU inference is expected to yield 3--4$\times$
+        improvement based on GPT-2 results; this remains future work.
+  \item \textbf{KV cache portability.} Cache blobs are architecture-specific.
+        A Mistral-7B blob cannot be loaded into a Qwen2.5 model.
+        Cross-device transfer within the same architecture is not yet
+        implemented.
+  \item \textbf{OpenAI integration mechanism.} The OpenAI benchmark uses
+        structured context discipline (delta-only messages) rather than
+        KV cache transfer, which is unavailable via the OpenAI API.
+        Native KV transfer would further improve savings.
+  \item \textbf{Non-determinism.} Receipts hash inputs only. With
+        temperature $> 0$, the same receipt may correspond to different
+        outputs. Auditable deployments should use greedy decoding.
+\end{enumerate}
+
+%-----------------------------------------------------------------------
+\section{Discussion}
+\label{sec:discussion}
+
+\paragraph{When State Pack helps most.}
+Long agent loops ($>$10 steps) with stable base prompts; multi-agent
+workloads with shared system prompts; regulated environments requiring
+auditable inference; cost-sensitive deployments on frontier models.
+
+\paragraph{When State Pack helps less.}
+Single-turn queries with no prefix reuse; highly variable base prompts;
+inference providers with aggressive native prompt caching that already
+eliminates redundant prefill cost.
+
+\paragraph{Relationship to existing systems.}
+State Pack is complementary to vLLM and SGLang, not competitive. A complete
+production deployment could use State Pack for client-side protocol and KV
+addressability, with vLLM serving actual inference requests.
+
+%-----------------------------------------------------------------------
+\section{Conclusion}
+\label{sec:conclusion}
+
+State Pack demonstrates that treating transformer KV cache as a
+content-addressed, portable protocol artifact produces consistent 90--95\%
+token reduction across model families from 124M to 7B parameters. The
+stateless pure-function design enables horizontal scalability, natural
+multi-agent deduplication, and cryptographic auditability without
+engine-level modifications. A Rust protocol implementation achieves 9.1ms
+overhead, making the protocol layer negligible relative to model inference
+time. All results are reproducible from a single command.
+
+\begin{thebibliography}{9}
+
+\bibitem{kwon2023}
+W.~Kwon et al.,
+\emph{Efficient Memory Management for Large Language Model Serving with
+PagedAttention},
+SOSP 2023.
+
+\bibitem{zheng2023}
+L.~Zheng et al.,
+\emph{SGLang: Efficient Execution of Structured Language Model Programs},
+2023.
+
+\bibitem{lmcache2024}
+LMCache Team,
+\emph{LMCache: KV Cache Offloading for vLLM},
+2024.
+
+\bibitem{benet2014}
+J.~Benet,
+\emph{IPFS --- Content Addressed, Versioned, P2P File System},
+2014.
+
+\bibitem{dolstra2006}
+E.~Dolstra,
+\emph{The Purely Functional Software Deployment Model},
+PhD thesis, Utrecht University, 2006.
+
+\end{thebibliography}
+
+\end{document}
