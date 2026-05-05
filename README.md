@@ -59,6 +59,9 @@ A tamper-evident receipt is emitted for every inference operation.
 **COMPACT** — after N steps, fold the accumulated delta chain back into a fresh base state.
 Compaction is triggered automatically by configurable policy, or manually by the client.
 
+**GC** — remove stale state packets from the store by age or count.
+Keeps storage bounded in long-running production deployments.
+
 ## On the OpenAI Integration
 
 The OpenAI benchmark does not transfer local KV cache tensors to OpenAI's servers —
@@ -113,12 +116,28 @@ GET  /health                                     -> { states_cached, requests_se
 
 Client chains hashes: `h0 -> infer -> h1 -> infer -> h2 -> compact -> h_fresh`
 
-Note: /merge is an internal operation used by the SDK when saving intermediate
-states to disk. It is not part of the user-facing protocol.
-
 The server cannot reconstruct a conversation even if asked to.
 The same state_hash from any client always returns the same result.
-The design is inherently horizontally scalable and supports multi-region deployment.
+Inherently horizontally scalable. Supports multi-region deployment.
+
+## CLI
+
+```bash
+# Full protocol lifecycle
+cargo run -- create   --model gpt2 --base base.txt --blob blob.pt --out store/
+cargo run -- verify   --manifest store/state_packet_<hash>.json
+cargo run -- delta    --manifest store/state_packet_<hash>.json --delta d.txt --out dp.json
+cargo run -- infer    --delta dp.json --store store/
+cargo run -- compact  --manifest store/state_packet_<hash>.json --delta dp.json --blob blob.pt --out store/
+
+# Storage management
+cargo run -- gc --store store/ --keep-latest 10
+cargo run -- gc --store store/ --older-than 7
+cargo run -- gc --store store/ --keep-latest 10 --dry-run
+
+# Benchmarks
+cargo run -- benchmark-native --base base.txt --blob blob.pt --steps 40
+```
 
 ## Quickstart
 
@@ -154,7 +173,7 @@ client.set_base('You are a research agent...\n\n')
 
 for delta in steps:
     result = client.step(delta)
-    # result: {output, savings_pct, compacted, receipt_id}
+    # {output, savings_pct, compacted, receipt_id}
 
 print(client.stats())
 # {tokens_saved: 3287, savings_pct: 90.8, compact_count: 2}
@@ -185,7 +204,7 @@ NeverPolicy()
 
 ```
 src/
-  main.rs                Rust CLI
+  main.rs                Rust CLI — create, verify, delta, infer, compact, gc
   server.rs              Rust HTTP server — protocol layer, 9ms latency
 
 state_pack/
@@ -207,6 +226,7 @@ examples/
   qwen_benchmark.py      Qwen2.5-3B benchmark
 
 calculator.html          Interactive savings calculator
+paper_outline.md         Academic paper outline
 ```
 
 ## Verified Models
@@ -230,10 +250,12 @@ calculator.html          Interactive savings calculator
 - [x] Multi-model benchmarks — GPT-2, Qwen2.5-3B, Mistral-7B, OpenAI
 - [x] Rust HTTP server — 9.1ms protocol latency, 12x faster than Python
 - [x] Auto-compaction — ThresholdPolicy, SavingsPolicy, configurable
+- [x] GC command — --older-than, --keep-latest, --dry-run
 - [x] Interactive savings calculator
+- [x] Academic paper outline
 - [ ] GPU benchmarks and optimized KV transfer
 - [ ] LangChain / LangGraph integration
-- [ ] Academic paper (arXiv then MLSys)
+- [ ] LaTeX paper (arXiv then MLSys)
 
 ## License
 
