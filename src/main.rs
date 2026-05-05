@@ -120,6 +120,21 @@ enum Command {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+    /// Garbage collect the packet store.
+    Gc {
+        /// Packet store directory.
+        #[arg(long, default_value = "packets")]
+        store: PathBuf,
+        /// Delete packets older than N days.
+        #[arg(long)]
+        older_than: Option<u64>,
+        /// Keep only the N most recently modified packets.
+        #[arg(long)]
+        keep_latest: Option<usize>,
+        /// Show what would be deleted without deleting anything.
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -191,6 +206,7 @@ fn main() -> Result<()> {
         Command::Tokenize { delta } => tokenize_delta(&delta),
         Command::Benchmark { script, input_cost_per_m, out } => run_benchmark(&script, input_cost_per_m, out.as_deref()),
         Command::BenchmarkNative { base, blob, steps, merge_every, merge_policy, merge_threshold, max_steps_without_merge, base_target_tokens, delta_variance, model, workdir, input_cost_per_m, out, report } => benchmark_native(&base, &blob, steps, merge_every, &merge_policy, merge_threshold, max_steps_without_merge, base_target_tokens, delta_variance, &model, &workdir, input_cost_per_m, out.as_deref(), report.as_deref()),
+        Command::Gc { store, older_than, keep_latest, dry_run } => run_gc(&store, older_than, keep_latest, dry_run),
     }
 }
 
@@ -734,6 +750,116 @@ fn resolve_packet(store: &Path, base_hash: &str) -> Result<()> {
     }
     println!("manifest={}", manifest.display());
     println!("blob={}", blob.display());
+    Ok(())
+}
+
+
+fn run_gc(
+    store: &Path,
+    older_than: Option<u64>,
+    keep_latest: Option<usize>,
+    dry_run: bool,
+) -> Result<()> {
+    if older_than.is_none() && keep_latest.is_none() {
+        bail!("specify --older-than <days> or --keep-latest <n>");
+    }
+
+    let mut entries: Vec<(std::path::PathBuf, std::time::SystemTime)> = fs::read_dir(store)
+        .with_context(|| format!("read store {}", store.display()))?
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.path().extension().map(|x| x == "json").unwrap_or(false)
+                && e.path()
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|n| n.starts_with("state_packet_"))
+                    .unwrap_or(false)
+        })
+        .filter_map(|e| {
+            let mtime = e.metadata().ok()?.modified().ok()?;
+            Some((e.path(), mtime))
+        })
+        .collect();
+
+    if entries.is_empty() {
+        println!("{{}}");
+        return Ok(());
+    }
+
+    entries.sort_by(|a, b| b.1.cmp(&a.1));
+
+    let now = std::time::SystemTime::now();
+    let mut to_delete: Vec<std::path::PathBuf> = Vec::new();
+
+    if let Some(days) = older_than {
+        let threshold = std::time::Duration::from_secs(days * 86400);
+        for (path, mtime) in &entries {
+            if let Ok(age) = now.duration_since(*mtime) {
+                if age > threshold {
+                    to_delete.push(path.clone());
+                }
+            }
+        }
+    }
+
+    if let Some(keep) = keep_latest {
+        if entries.len() > keep {
+            for (p, _) in &entries[keep..] {
+                if !to_delete.contains(p) {
+                    to_delete.push(p.clone());
+                }
+            }
+        }
+    }
+
+    let mut deleted_manifests = 0usize;
+    let mut deleted_blobs     = 0usize;
+    let mut freed_bytes       = 0u64;
+    let mut skipped           = 0usize;
+
+    for manifest_path in &to_delete {
+        let blob_path  = manifest_path.with_extension("pt");
+        let blob_bytes = blob_path.metadata().map(|m| m.len()).unwrap_or(0);
+        let mani_bytes = manifest_path.metadata().map(|m| m.len()).unwrap_or(0);
+
+        if dry_run {
+            let line = format!(
+                "dry_run=true would_delete={} blob_mb={:.2}",
+                manifest_path.display(),
+                blob_bytes as f64 / 1_048_576.0
+            );
+            println!("{}", line);
+            skipped += 1;
+        } else {
+            if manifest_path.exists() {
+                fs::remove_file(manifest_path)
+                    .with_context(|| format!("delete {}", manifest_path.display()))?;
+                deleted_manifests += 1;
+                freed_bytes += mani_bytes;
+            }
+            if blob_path.exists() {
+                fs::remove_file(&blob_path)
+                    .with_context(|| format!("delete {}", blob_path.display()))?;
+                deleted_blobs += 1;
+                freed_bytes += blob_bytes;
+            }
+        }
+    }
+
+    let result = serde_json::json!({
+        "op": "gc",
+        "ok": true,
+        "dry_run": dry_run,
+        "store": store.display().to_string(),
+        "scanned": entries.len(),
+        "deleted_manifests": deleted_manifests,
+        "deleted_blobs": deleted_blobs,
+        "skipped_dry_run": skipped,
+        "freed_bytes": freed_bytes,
+        "freed_mb": (freed_bytes as f64 / 1_048_576.0 * 100.0).round() / 100.0,
+        "remaining": entries.len().saturating_sub(to_delete.len()),
+    });
+    println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())
 }
 
