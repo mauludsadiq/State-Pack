@@ -95,6 +95,10 @@ COMPACT(state_hash, deltas[]) -> new_state_hash
   Fold accumulated delta list into fresh base state.
   Prevents unbounded growth of the delta chain.
 
+GC(store, older_than?, keep_latest?) -> receipt
+  Remove manifest+blob pairs by age or count.
+  Keeps storage bounded in production deployments.
+
 ### 3.3 Hash Chain
 
 The client maintains a hash chain:
